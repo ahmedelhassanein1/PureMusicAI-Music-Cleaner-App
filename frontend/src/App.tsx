@@ -15,7 +15,7 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState("");
   const [status, setStatus] = useState<string>("idle");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); 
 
   useEffect(() => {
     fetchModels()

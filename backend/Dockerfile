@@ -9,7 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
+# Install PyTorch CPU wheels first (avoids pip resolver conflicts in slim image).
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
+
 
 COPY app ./app
 
