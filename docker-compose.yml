@@ -1,0 +1,30 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/jobs:/app/jobs
+      - ./backend/models:/app/models
+    environment:
+      - JOBS_DIR=/app/jobs
+      - MODELS_DIR=/app/models
+      - CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]
+    # Uncomment for NVIDIA GPU in Docker (requires Container Toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
