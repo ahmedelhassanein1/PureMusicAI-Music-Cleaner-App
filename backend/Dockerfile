@@ -1,18 +1,26 @@
 FROM python:3.11-slim
 
-# ffmpeg is required by audio-separator for non-WAV inputs.
+# ffmpeg + build tools: audio-separator pulls in diffq, which compiles a C extension.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
+    libgomp1 \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt .
-# Install PyTorch CPU wheels first (avoids pip resolver conflicts in slim image).
-RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir -r requirements.txt
 
+RUN pip install --upgrade pip
+
+# PyTorch first — large download, avoids resolver conflicts.
+RUN pip install --no-cache-dir \
+    torch \
+    torchaudio \
+    --index-url https://download.pytorch.org/whl/cpu
+
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
