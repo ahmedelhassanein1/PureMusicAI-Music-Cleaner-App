@@ -1,0 +1,212 @@
+"""
+Phase 2 — speech detection and removal.
+
+Detects spoken dialogue with OmniVAD, then attenuates those time ranges in the
+audio. Music outside speech segments is left unchanged.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import soundfile as sf
+
+logger = logging.getLogger(__name__)
+
+_vad_instance = None
+
+
+@dataclass(frozen=True)
+class SpeechSegment:
+    """Speech time range in seconds (start, end)."""
+
+    start: float
+    end: float
+
+
+def detect_speech_segments(
+    audio_path: Path,
+    *,
+    chunk_seconds: int | None = None,
+    overlap_seconds: int = 2,
+) -> list[SpeechSegment]:
+    """
+    Detect speech regions in an audio file using OmniVAD.
+
+    Returns a list of (start, end) segments in seconds.
+    Empty list means no speech was found.
+    Use chunk_seconds for long files to limit memory use.
+    """
+    vad = _get_vad()
+
+    try:
+        if chunk_seconds is not None:
+            result = vad.detect(
+                str(audio_path),
+                chunk_seconds=chunk_seconds,
+                overlap_seconds=overlap_seconds,
+            )
+        else:
+            result = vad.detect(str(audio_path))
+    except Exception:
+        audio, _sr = _load_audio(audio_path)
+        mono = _to_mono(audio)
+        result = vad.detect(mono.astype(np.float32))
+
+    timestamps = result.get("timestamps", [])
+    segments = [
+        SpeechSegment(start=float(start), end=float(end))
+        for start, end in timestamps
+        if float(end) > float(start)
+    ]
+    logger.info("Detected %d speech segment(s) in %s", len(segments), audio_path.name)
+    return segments
+
+
+def attenuate_speech(
+    input_path: Path,
+    output_path: Path,
+    *,
+    strength: float = 1.0,
+    segments: list[SpeechSegment] | None = None,
+    padding_sec: float = 0.05,
+    fade_ms: float = 20.0,
+) -> Path:
+    """
+    Lower volume in speech regions and write the result to output_path.
+
+    strength: 0.0 = no change, 1.0 = full mute in speech regions.
+    segments: optional pre-detected list; runs detection if omitted.
+    padding_sec / fade_ms: soften segment edges to avoid clicks.
+    """
+    strength = float(np.clip(strength, 0.0, 1.0))
+
+    if strength <= 0.0:
+        audio, sample_rate = _load_audio(input_path)
+        sf.write(output_path, audio, sample_rate)
+        return output_path
+
+    audio, sample_rate = _load_audio(input_path)
+
+    if segments is None:
+        segments = detect_speech_segments(input_path)
+
+    if not segments:
+        logger.info("No speech segments — copying input unchanged")
+        sf.write(output_path, audio, sample_rate)
+        return output_path
+
+    processed = _apply_segment_gain(
+        audio=audio,
+        sample_rate=sample_rate,
+        segments=segments,
+        strength=strength,
+        padding_sec=padding_sec,
+        fade_ms=fade_ms,
+    )
+    sf.write(output_path, processed, sample_rate)
+    logger.info("Wrote speech-attenuated audio to %s", output_path.name)
+    return output_path
+
+
+def _get_vad():
+    """Return a shared OmniVAD instance (loaded once per worker process)."""
+    global _vad_instance
+    if _vad_instance is None:
+        from omnivad import OmniVAD
+
+        _vad_instance = OmniVAD()
+    return _vad_instance
+
+
+def _load_audio(path: Path) -> tuple[np.ndarray, int]:
+    """
+    Load audio as float32 array (samples, channels) and sample rate.
+    always_2d=True keeps mono and stereo shapes consistent.
+    """
+    audio, sample_rate = sf.read(path, always_2d=True)
+    return audio.astype(np.float32), int(sample_rate)
+
+
+def _to_mono(audio: np.ndarray) -> np.ndarray:
+    """Average channels to mono (used for VAD input only)."""
+    if audio.ndim == 1:
+        return audio
+    return audio.mean(axis=1)
+
+
+def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Merge overlapping (start, end) sample ranges into non-overlapping spans."""
+    if not ranges:
+        return []
+    sorted_ranges = sorted(ranges, key=lambda r: r[0])
+    merged: list[tuple[int, int]] = [sorted_ranges[0]]
+    for start, end in sorted_ranges[1:]:
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end:
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _segments_to_sample_ranges(
+    segments: list[SpeechSegment],
+    sample_rate: int,
+    padding_sec: float,
+    num_samples: int,
+) -> list[tuple[int, int]]:
+    """
+    Convert second-based segments to sample index ranges.
+    Applies padding and clamps to the audio length.
+    """
+    ranges: list[tuple[int, int]] = []
+    pad = int(padding_sec * sample_rate)
+    for seg in segments:
+        start = max(0, int(seg.start * sample_rate) - pad)
+        end = min(num_samples, int(seg.end * sample_rate) + pad)
+        if end > start:
+            ranges.append((start, end))
+    return _merge_ranges(ranges)
+
+
+def _apply_segment_gain(
+    audio: np.ndarray,
+    sample_rate: int,
+    segments: list[SpeechSegment],
+    strength: float,
+    padding_sec: float,
+    fade_ms: float,
+) -> np.ndarray:
+    """
+    Attenuate speech regions by (1 - strength) with short linear fades.
+    Each segment: fade in → hold at target gain → fade out.
+    """
+    out = audio.copy()
+    num_samples = out.shape[0]
+    target_gain = 1.0 - strength
+    fade_samples = max(1, int(sample_rate * fade_ms / 1000.0))
+
+    for start, end in _segments_to_sample_ranges(
+        segments, sample_rate, padding_sec, num_samples
+    ):
+        fade_in_end = min(end, start + fade_samples)
+        for i, idx in enumerate(range(start, fade_in_end)):
+            t = (i + 1) / fade_samples
+            gain = 1.0 - (1.0 - target_gain) * t
+            out[idx] *= gain
+
+        core_start = fade_in_end
+        core_end = max(core_start, end - fade_samples)
+        if core_end > core_start:
+            out[core_start:core_end] *= target_gain
+
+        for i, idx in enumerate(range(core_end, end)):
+            t = 1.0 - (i + 1) / fade_samples
+            gain = 1.0 - (1.0 - target_gain) * t
+            out[idx] *= gain
+
+    return out

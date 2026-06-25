@@ -14,10 +14,12 @@ COPY requirements.txt .
 
 RUN pip install --upgrade pip
 
-# PyTorch first — large download, avoids resolver conflicts.
+# PyTorch stack from one index so torch / torchvision / torchaudio versions match.
+# Mismatch causes: RuntimeError: operator torchvision::nms does not exist
 RUN pip install --no-cache-dir \
-    torch \
-    torchaudio \
+    torch==2.5.1 \
+    torchvision==0.20.1 \
+    torchaudio==2.5.1 \
     --index-url https://download.pytorch.org/whl/cpu
 
 RUN pip install --no-cache-dir -r requirements.txt
