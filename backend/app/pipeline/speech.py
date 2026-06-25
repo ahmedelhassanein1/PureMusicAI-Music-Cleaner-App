@@ -11,12 +11,17 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+import librosa
 import numpy as np
 import soundfile as sf
 
 logger = logging.getLogger(__name__)
 
 _vad_instance = None
+
+# OmniVAD only accepts 16 kHz audio.
+DEFAULT_MAX_SPEECH_COVERAGE = 0.35
+VAD_SAMPLE_RATE = 16_000
 
 
 @dataclass(frozen=True)
@@ -36,25 +41,27 @@ def detect_speech_segments(
     """
     Detect speech regions in an audio file using OmniVAD.
 
+    Audio is resampled to 16 kHz before detection (required by OmniVAD).
     Returns a list of (start, end) segments in seconds.
     Empty list means no speech was found.
     Use chunk_seconds for long files to limit memory use.
     """
     vad = _get_vad()
+    audio_16k, duration_sec = _load_audio_16k(audio_path)
 
     try:
         if chunk_seconds is not None:
             result = vad.detect(
-                str(audio_path),
+                audio_16k,
+                sample_rate=VAD_SAMPLE_RATE,
                 chunk_seconds=chunk_seconds,
                 overlap_seconds=overlap_seconds,
             )
         else:
-            result = vad.detect(str(audio_path))
+            result = vad.detect(audio_16k, sample_rate=VAD_SAMPLE_RATE)
     except Exception:
-        audio, _sr = _load_audio(audio_path)
-        mono = _to_mono(audio)
-        result = vad.detect(mono.astype(np.float32))
+        logger.exception("OmniVAD detect failed for %s", audio_path.name)
+        return []
 
     timestamps = result.get("timestamps", [])
     segments = [
@@ -62,8 +69,39 @@ def detect_speech_segments(
         for start, end in timestamps
         if float(end) > float(start)
     ]
-    logger.info("Detected %d speech segment(s) in %s", len(segments), audio_path.name)
+    coverage = speech_coverage_fraction(segments, duration_sec)
+    logger.info(
+        "Detected %d speech segment(s) in %s (%.1f%% coverage)",
+        len(segments),
+        audio_path.name,
+        coverage * 100,
+    )
     return segments
+
+
+def speech_coverage_fraction(
+    segments: list[SpeechSegment],
+    duration_sec: float,
+) -> float:
+    """Return the fraction of the timeline covered by merged speech segments."""
+    if not segments or duration_sec <= 0:
+        return 0.0
+
+    merged = _merge_time_segments(segments)
+    covered_sec = sum(end - start for start, end in merged)
+    return min(1.0, covered_sec / duration_sec)
+
+
+def should_apply_speech_removal(
+    segments: list[SpeechSegment],
+    duration_sec: float,
+    *,
+    max_coverage: float = DEFAULT_MAX_SPEECH_COVERAGE,
+) -> bool:
+    """Return whether speech segments are within a typical dialogue-over-music range."""
+    if not segments:
+        return False
+    return speech_coverage_fraction(segments, duration_sec) <= max_coverage
 
 
 def attenuate_speech(
@@ -72,7 +110,7 @@ def attenuate_speech(
     *,
     strength: float = 1.0,
     segments: list[SpeechSegment] | None = None,
-    padding_sec: float = 0.05,
+    padding_sec: float = 0.12,
     fade_ms: float = 20.0,
 ) -> Path:
     """
@@ -131,11 +169,36 @@ def _load_audio(path: Path) -> tuple[np.ndarray, int]:
     return audio.astype(np.float32), int(sample_rate)
 
 
+def _load_audio_16k(path: Path) -> tuple[np.ndarray, float]:
+    """Load mono audio resampled to 16 kHz; return (samples, duration_sec)."""
+    audio, sample_rate = _load_audio(path)
+    mono = _to_mono(audio)
+    if sample_rate != VAD_SAMPLE_RATE:
+        mono = librosa.resample(mono, orig_sr=sample_rate, target_sr=VAD_SAMPLE_RATE)
+    duration_sec = len(mono) / VAD_SAMPLE_RATE
+    return np.ascontiguousarray(mono, dtype=np.float32), duration_sec
+
+
 def _to_mono(audio: np.ndarray) -> np.ndarray:
     """Average channels to mono (used for VAD input only)."""
     if audio.ndim == 1:
         return audio
     return audio.mean(axis=1)
+
+
+def _merge_time_segments(segments: list[SpeechSegment]) -> list[tuple[float, float]]:
+    """Merge overlapping speech segments in the time domain."""
+    if not segments:
+        return []
+    sorted_segments = sorted(segments, key=lambda s: s.start)
+    merged: list[tuple[float, float]] = [(sorted_segments[0].start, sorted_segments[0].end)]
+    for seg in sorted_segments[1:]:
+        prev_start, prev_end = merged[-1]
+        if seg.start <= prev_end:
+            merged[-1] = (prev_start, max(prev_end, seg.end))
+        else:
+            merged.append((seg.start, seg.end))
+    return merged
 
 
 def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
