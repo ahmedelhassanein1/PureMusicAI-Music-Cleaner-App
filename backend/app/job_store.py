@@ -19,8 +19,6 @@ from app.settings import settings
 PIPELINE_STAGES = (
     "queued",
     "separating",
-    "detecting_speech",
-    "removing_speech",
     "detecting_sfx",
     "removing_sfx",
     "done",
@@ -37,7 +35,7 @@ def create_job(model_id: str, original_filename: str) -> dict[str, Any]:
     Create a new job folder and return its initial status dict.
 
     Each job gets a UUID directory under jobs/ with status.json tracking
-    progress through the pipeline (UVR → speech → SFX).
+    progress through the pipeline (UVR → SFX).
     """
     job_id = str(uuid.uuid4())
     job_dir = settings.jobs_dir / job_id
@@ -52,11 +50,9 @@ def create_job(model_id: str, original_filename: str) -> dict[str, Any]:
         "original_filename": original_filename,
         "output_filename": None,
         "error": None,
-        # Phase 2 metadata — filled in as the pipeline runs
-        "speech_segment_count": None,
+        # SFX metadata — filled in as the pipeline runs
         "sfx_segment_count": None,
         "sfx_classes_detected": [],
-        "speech_strength": 1.0,
         "sfx_strength": 1.0,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
@@ -101,7 +97,7 @@ def set_stage(
     """
     Update the current pipeline stage shown to the frontend.
 
-    Phase 2 stages: detecting_speech → removing_speech → detecting_sfx → removing_sfx.
+    Phase 2 stages: detecting_sfx → removing_sfx.
     Optional progress (0–100) and extra fields (e.g. speech_segment_count) can
     be passed in the same write so the UI gets one consistent snapshot.
     """

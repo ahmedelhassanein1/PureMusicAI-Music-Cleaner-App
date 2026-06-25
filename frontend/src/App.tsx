@@ -12,6 +12,8 @@ function formatStage(stage: string): string {
     queued: "Waiting in queue",
     loading_model: "Loading model weights",
     separating: "Separating stems",
+    detecting_sfx: "Scanning for sound effects",
+    removing_sfx: "Reducing sound effects",
     finalizing: "Finalizing output",
     done: "Complete",
     error: "Error",
