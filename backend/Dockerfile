@@ -1,11 +1,13 @@
 FROM python:3.11-slim
 
 # ffmpeg + build tools: audio-separator pulls in diffq, which compiles a C extension.
+# wget: download PANNs label CSV + model weights for panns-inference (Phase 2 SFX).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     libgomp1 \
     build-essential \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -23,6 +25,13 @@ RUN pip install --no-cache-dir \
     --index-url https://download.pytorch.org/whl/cpu
 
 RUN pip install --no-cache-dir -r requirements.txt
+
+# panns-inference expects these under /root/panns_data (not bundled in pip package).
+RUN mkdir -p /root/panns_data \
+    && wget -q -O /root/panns_data/class_labels_indices.csv \
+        http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/class_labels_indices.csv \
+    && wget -q -O /root/panns_data/Cnn14_mAP=0.431.pth \
+        "https://zenodo.org/record/3987831/files/Cnn14_mAP%3D0.431.pth?download=1"
 
 COPY app ./app
 
