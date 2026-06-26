@@ -2,12 +2,8 @@
 FastAPI application — upload, job status, download.
 
 Pipeline per job:
-  1. UVR stem separation (vocals removed)
-  2. SFX detection + attenuation (PANNs / AudioSet denylist)
-
-Speech removal (OmniVAD) is disabled for now — it over-mutes narration-heavy
-clips and is a poor fit for generic instrumental cleanup. See pipeline/speech.py
-if we revisit dialogue removal in a later phase.
+  1. UVR instrumental separation → instrumental_raw.wav (download default)
+  2. SFX detection + attenuation → instrumental.wav (only when SFX are found)
 """
 
 from __future__ import annotations
@@ -22,14 +18,14 @@ from fastapi.responses import FileResponse
 
 from app import job_store
 from app.pipeline.model_registry import get_preset, list_presets
-from app.pipeline.separator import separate_instrumental
+from app.pipeline.separator import canonicalize_instrumental, separate_instrumental
 from app.pipeline.sfx import attenuate_sfx, detect_sfx_segments
 from app.settings import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Music Cleaner API", version="0.2.1")
+app = FastAPI(title="Music Cleaner API", version="0.2.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -129,9 +125,10 @@ def _run_pipeline(
     sfx_strength: float,
 ) -> None:
     """
-    Background worker: UVR separation → SFX cleanup.
+    Background worker: UVR separation → optional SFX cleanup.
 
-    Writes instrumental_raw.wav then final instrumental.wav.
+    Download defaults to instrumental_raw.wav (pure UVR stem). instrumental.wav
+    is only served when SFX regions were actually detected and attenuated.
     """
     preset = get_preset(model_id)
     if preset is None:
@@ -141,25 +138,24 @@ def _run_pipeline(
     directory = job_store.job_dir(job_id)
 
     try:
-        # --- Step 1: UVR vocal separation ---
+        # --- Step 1: UVR instrumental separation ---
         job_store.set_stage(job_id, "separating", progress=5, status="processing")
 
         def on_separate(percent: int, _stage: str) -> None:
-            mapped = 5 + int((percent / 100) * 60)
+            mapped = 5 + int((percent / 100) * 65)
             job_store.update_job(job_id, progress=mapped)
 
-        instrumental = separate_instrumental(
+        uvr_output = separate_instrumental(
             input_path=input_path,
             output_dir=directory,
             preset=preset,
             progress_callback=on_separate,
         )
-        work_path = directory / "instrumental_raw.wav"
-        if instrumental != work_path:
-            shutil.move(str(instrumental), str(work_path))
+        work_path = canonicalize_instrumental(uvr_output, directory)
+        download_name = "instrumental_raw.wav"
 
         # --- Step 2: Detect SFX (PANNs / AudioSet denylist) ---
-        job_store.set_stage(job_id, "detecting_sfx", progress=72)
+        job_store.set_stage(job_id, "detecting_sfx", progress=75)
         sfx_segments, fired_labels = detect_sfx_segments(work_path)
         job_store.update_job(
             job_id,
@@ -169,22 +165,26 @@ def _run_pipeline(
         if fired_labels:
             logger.info("Job %s SFX classes detected: %s", job_id, fired_labels)
 
-        # --- Step 3: Attenuate SFX regions ---
-        job_store.set_stage(job_id, "removing_sfx", progress=85)
-        final_path = directory / "instrumental.wav"
-        attenuate_sfx(
-            work_path,
-            final_path,
-            strength=sfx_strength,
-            segments=sfx_segments,
-        )
+        # --- Step 3: Attenuate SFX only when something was detected ---
+        if sfx_segments and sfx_strength > 0:
+            job_store.set_stage(job_id, "removing_sfx", progress=88)
+            final_path = directory / "instrumental.wav"
+            attenuate_sfx(
+                work_path,
+                final_path,
+                strength=sfx_strength,
+                segments=sfx_segments,
+            )
+            download_name = "instrumental.wav"
+        else:
+            logger.info("Job %s: no SFX to remove — download will use UVR stem", job_id)
 
         job_store.set_stage(
             job_id,
             "done",
             progress=100,
             status="completed",
-            output_filename="instrumental.wav",
+            output_filename=download_name,
         )
     except Exception as exc:  # noqa: BLE001 — surface error to client via status.json
         logger.exception("Job %s failed", job_id)
