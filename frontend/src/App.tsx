@@ -7,23 +7,34 @@ import {
   uploadAudio,
 } from "./api/client";
 
+const STAGE_LABELS: Record<string, string> = {
+  queued: "Waiting in queue",
+  loading_model: "Loading model weights",
+  separating: "Separating vocals from music",
+  detecting_sfx: "Scanning for sound effects",
+  removing_sfx: "Reducing detected sound effects",
+  finalizing: "Finalizing output",
+  done: "Processing complete",
+  error: "Error",
+};
+
 function formatStage(stage: string): string {
-  const labels: Record<string, string> = {
-    queued: "Waiting in queue",
-    loading_model: "Loading model weights",
-    separating: "Separating stems",
-    detecting_sfx: "Scanning for sound effects",
-    removing_sfx: "Reducing sound effects",
-    finalizing: "Finalizing output",
-    done: "Complete",
-    error: "Error",
-  };
-  return labels[stage] ?? stage.replace(/_/g, " ");
+  return STAGE_LABELS[stage] ?? stage.replace(/_/g, " ");
+}
+
+function progressBarLabel(stage: string, status: string): string {
+  if (status === "uploading") return "Uploading audio…";
+  if (status === "completed") return STAGE_LABELS.done;
+  if (status === "failed") return STAGE_LABELS.error;
+  if (stage) return formatStage(stage);
+  if (status === "queued") return STAGE_LABELS.queued;
+  return "Processing…";
 }
 
 export default function App() {
   const [models, setModels] = useState<ModelPreset[]>([]);
   const [modelId, setModelId] = useState("balanced");
+  const [sfxStrength, setSfxStrength] = useState(100);
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
@@ -88,7 +99,7 @@ export default function App() {
     setStatus("uploading");
 
     try {
-      const result = await uploadAudio(file, modelId);
+      const result = await uploadAudio(file, modelId, sfxStrength / 100);
       setJobId(result.job_id);
       setStatus("queued");
     } catch (err) {
@@ -163,6 +174,30 @@ export default function App() {
           </div>
         </section>
 
+        <section className="panel-section">
+          <h2 className="section-title">Sound effect removal</h2>
+          <label className="slider-control" htmlFor="sfx-strength">
+            <div className="slider-header">
+              <span>SFX reduction strength</span>
+              <span className="slider-value">{sfxStrength}%</span>
+            </div>
+            <input
+              id="sfx-strength"
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={sfxStrength}
+              onChange={(e) => setSfxStrength(Number(e.target.value))}
+              disabled={isBusy}
+            />
+            <p className="slider-hint">
+              0% keeps all SFX · 100% fully mutes detected explosions, whooshes,
+              and similar effects
+            </p>
+          </label>
+        </section>
+
         <div className="action-row">
           <span className="action-hint">
             {selectedModel
@@ -211,7 +246,9 @@ export default function App() {
 
           <div className="progress-wrap">
             <div className="progress-labels">
-              <span>Progress</span>
+              <span className="progress-stage">
+                {progressBarLabel(stage, status)}
+              </span>
               <span>{progress}%</span>
             </div>
             <div className="progress-bar">
