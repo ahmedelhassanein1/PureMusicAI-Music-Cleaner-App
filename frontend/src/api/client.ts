@@ -28,10 +28,12 @@ export async function fetchModels(): Promise<ModelPreset[]> {
 export async function uploadAudio(
   file: File,
   modelId: string,
+  sfxStrength = 1.0,
 ): Promise<{ job_id: string }> {
   const form = new FormData();
   form.append("file", file);
   form.append("model_id", modelId);
+  form.append("sfx_strength", String(Math.max(0, Math.min(1, sfxStrength))));
 
   const res = await fetch(`${API_BASE}/upload`, {
     method: "POST",
