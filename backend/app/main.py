@@ -12,12 +12,12 @@ import logging
 import shutil
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app import job_store
-from app.pipeline.model_registry import get_preset, list_presets
+from app.pipeline.model_registry import get_preset, list_all_models, list_presets
 from app.pipeline.separator import canonicalize_instrumental, separate_instrumental
 from app.pipeline.sfx import attenuate_sfx, detect_sfx_segments
 from app.settings import settings
@@ -25,7 +25,7 @@ from app.settings import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Music Cleaner API", version="0.2.3")
+app = FastAPI(title="Music Cleaner API", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,8 +42,22 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/models")
-def models() -> dict:
-    return {"models": list_presets()}
+def models(full: bool = Query(default=False)) -> dict:
+    """
+    List separation models.
+
+    Default: curated presets from model_registry (starter, karaoke, classic, ensemble).
+    ?full=true: entire audio-separator catalog (proxies --list_models).
+    """
+    if full:
+        return {
+            "source": "audio-separator",
+            "models": list_all_models(),
+        }
+    return {
+        "source": "registry",
+        "models": list_presets(),
+    }
 
 
 @app.post("/api/upload")
