@@ -19,7 +19,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 function formatStage(stage: string): string {
-  return STAGE_LABELS[stage] ?? stage.replace(/_/g, " ");
+  return STAGE_LABELS[stage] ?? stage.replace(/_/g, " "); 
 }
 
 function progressBarLabel(stage: string, status: string): string {
