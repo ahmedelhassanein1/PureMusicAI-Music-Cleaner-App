@@ -2,8 +2,9 @@
 FastAPI application — upload, job status, download.
 
 Pipeline per job:
-  1. UVR instrumental separation → instrumental_raw.wav (download default)
-  2. SFX detection + attenuation → instrumental.wav (only when SFX are found)
+  1. UVR instrumental separation → instrumental_raw.wav (standard bed)
+  2. Optional choir preservation (karaoke stem + heuristics) when enabled
+  3. SFX detection + attenuation → instrumental.wav (only when SFX are found)
 """
 
 from __future__ import annotations
@@ -17,7 +18,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app import job_store
-from app.pipeline.model_registry import get_preset, list_all_models, list_presets
+from app.pipeline.choir import preserve_choir
+from app.pipeline.model_registry import (
+    DEFAULT_KARAOKE_MODEL_ID,
+    REFERENCE_INSTRUMENTAL_MODEL_ID,
+    ModelPreset,
+    get_preset,
+    is_separable_preset,
+    list_all_models,
+    list_karaoke_presets,
+    list_presets,
+)
 from app.pipeline.separator import canonicalize_instrumental, separate_instrumental
 from app.pipeline.sfx import attenuate_sfx, detect_sfx_segments
 from app.settings import settings
@@ -25,7 +36,7 @@ from app.settings import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Music Cleaner API", version="0.3.0")
+app = FastAPI(title="Music Cleaner API", version="0.3.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,6 +68,8 @@ def models(full: bool = Query(default=False)) -> dict:
     return {
         "source": "registry",
         "models": list_presets(),
+        "karaoke_models": list_karaoke_presets(),
+        "default_karaoke_model_id": DEFAULT_KARAOKE_MODEL_ID,
     }
 
 
@@ -65,11 +78,14 @@ async def upload(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     model_id: str = Form(default="balanced"),
+    karaoke_model_id: str = Form(default=DEFAULT_KARAOKE_MODEL_ID),
+    choir_aggressiveness: float = Form(default=0.0),
     sfx_strength: float = Form(default=1.0),
 ) -> dict:
     """
-    Accept an audio upload and queue separation + SFX cleanup.
+    Accept an audio upload and queue separation + optional choir + SFX cleanup.
 
+    choir_aggressiveness: 0.0–1.0 — blends extracted choir back onto the bed.
     sfx_strength: 0.0–1.0 (1.0 = full attenuation in detected SFX regions).
     """
     preset = get_preset(model_id)
@@ -79,11 +95,26 @@ async def upload(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
 
+    choir_aggressiveness = float(max(0.0, min(1.0, choir_aggressiveness)))
     sfx_strength = float(max(0.0, min(1.0, sfx_strength)))
+
+    karaoke_preset = get_preset(karaoke_model_id)
+    if choir_aggressiveness > 0 and (
+        karaoke_preset is None or not karaoke_preset.is_karaoke
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown or invalid karaoke_model_id: {karaoke_model_id}",
+        )
 
     status = job_store.create_job(model_id=model_id, original_filename=file.filename)
     job_id = status["id"]
-    job_store.update_job(job_id, sfx_strength=sfx_strength)
+    job_store.update_job(
+        job_id,
+        sfx_strength=sfx_strength,
+        karaoke_model_id=karaoke_model_id,
+        choir_aggressiveness=choir_aggressiveness,
+    )
 
     directory = job_store.job_dir(job_id)
     suffix = Path(file.filename).suffix or ".wav"
@@ -96,6 +127,8 @@ async def upload(
         job_id,
         input_path,
         preset.id,
+        karaoke_model_id,
+        choir_aggressiveness,
         sfx_strength,
     )
     return {"job_id": job_id, "status": status["status"]}
@@ -132,43 +165,128 @@ def download(job_id: str) -> FileResponse:
     )
 
 
+def _resolve_pipeline_presets(
+    model_id: str,
+    karaoke_model_id: str,
+    choir_aggressiveness: float,
+) -> tuple[ModelPreset, ModelPreset | None, float, bool]:
+    """
+    Map UI/API model picks to (standard bed, karaoke stem, aggressiveness, choir_on).
+
+    When the main model is karaoke, balanced is used as the standard bed and choir
+    preservation is enabled automatically unless aggressiveness is explicitly 0.
+    """
+    preset = get_preset(model_id)
+    if preset is None:
+        raise ValueError(f"Invalid model_id: {model_id}")
+
+    karaoke_preset = get_preset(karaoke_model_id)
+    aggressiveness = choir_aggressiveness
+
+    if preset.is_karaoke:
+        karaoke_preset = preset
+        reference = get_preset(REFERENCE_INSTRUMENTAL_MODEL_ID)
+        if reference is None or not is_separable_preset(reference):
+            raise ValueError("Reference instrumental preset is not available")
+        standard_preset = reference
+        if aggressiveness <= 0.0:
+            aggressiveness = 1.0
+    else:
+        standard_preset = preset
+        if not is_separable_preset(standard_preset):
+            raise ValueError(
+                f"Model {model_id} cannot run standalone separation "
+                "(ensemble presets are not wired yet)"
+            )
+
+    choir_enabled = (
+        aggressiveness > 0.0
+        and karaoke_preset is not None
+        and karaoke_preset.is_karaoke
+        and is_separable_preset(karaoke_preset)
+    )
+    return standard_preset, karaoke_preset if choir_enabled else None, aggressiveness, choir_enabled
+
+
 def _run_pipeline(
     job_id: str,
     input_path: Path,
     model_id: str,
+    karaoke_model_id: str,
+    choir_aggressiveness: float,
     sfx_strength: float,
 ) -> None:
     """
-    Background worker: UVR separation → optional SFX cleanup.
+    Background worker: UVR separation → optional choir → optional SFX cleanup.
 
-    Download defaults to instrumental_raw.wav (pure UVR stem). instrumental.wav
+    Download defaults to instrumental_raw.wav (UVR / choir stem). instrumental.wav
     is only served when SFX regions were actually detected and attenuated.
     """
-    preset = get_preset(model_id)
-    if preset is None:
-        job_store.update_job(job_id, status="failed", stage="error", error="Invalid model")
+    try:
+        standard_preset, karaoke_preset, choir_aggressiveness, choir_enabled = (
+            _resolve_pipeline_presets(model_id, karaoke_model_id, choir_aggressiveness)
+        )
+    except ValueError as exc:
+        job_store.update_job(job_id, status="failed", stage="error", error=str(exc))
         return
 
     directory = job_store.job_dir(job_id)
 
     try:
-        # --- Step 1: UVR instrumental separation ---
+        # --- Step 1: standard instrumental separation ---
         job_store.set_stage(job_id, "separating", progress=5, status="processing")
 
-        def on_separate(percent: int, _stage: str) -> None:
-            mapped = 5 + int((percent / 100) * 65)
+        def on_standard_separate(percent: int, _stage: str) -> None:
+            cap = 35 if choir_enabled else 65
+            mapped = 5 + int((percent / 100) * (cap - 5))
             job_store.update_job(job_id, progress=mapped)
 
         uvr_output = separate_instrumental(
             input_path=input_path,
             output_dir=directory,
-            preset=preset,
-            progress_callback=on_separate,
+            preset=standard_preset,
+            progress_callback=on_standard_separate,
         )
         work_path = canonicalize_instrumental(uvr_output, directory)
         download_name = "instrumental_raw.wav"
 
-        # --- Step 2: Detect SFX (PANNs / AudioSet denylist) ---
+        # --- Step 2: optional choir preservation via karaoke stem ---
+        if choir_enabled and karaoke_preset is not None:
+            job_store.set_stage(job_id, "separating_karaoke", progress=38)
+
+            def on_karaoke_separate(percent: int, _stage: str) -> None:
+                mapped = 38 + int((percent / 100) * 22)
+                job_store.update_job(job_id, progress=mapped)
+
+            karaoke_uvr = separate_instrumental(
+                input_path=input_path,
+                output_dir=directory,
+                preset=karaoke_preset,
+                progress_callback=on_karaoke_separate,
+            )
+            karaoke_path = canonicalize_instrumental(
+                karaoke_uvr,
+                directory,
+                dest_name="karaoke_instrumental_raw.wav",
+            )
+
+            job_store.set_stage(job_id, "preserving_choir", progress=62)
+            choir_output = directory / "choir_preserved.wav"
+            preserve_choir(
+                work_path,
+                karaoke_path,
+                choir_output,
+                aggressiveness=choir_aggressiveness,
+            )
+            shutil.copy2(choir_output, work_path)
+            logger.info(
+                "Job %s: choir preserved (aggressiveness=%.2f, karaoke=%s)",
+                job_id,
+                choir_aggressiveness,
+                karaoke_preset.id,
+            )
+
+        # --- Step 3: Detect SFX (PANNs / AudioSet denylist) ---
         job_store.set_stage(job_id, "detecting_sfx", progress=75)
         sfx_segments, fired_labels = detect_sfx_segments(work_path)
         job_store.update_job(
@@ -179,7 +297,7 @@ def _run_pipeline(
         if fired_labels:
             logger.info("Job %s SFX classes detected: %s", job_id, fired_labels)
 
-        # --- Step 3: Attenuate SFX only when something was detected ---
+        # --- Step 4: Attenuate SFX only when something was detected ---
         if sfx_segments and sfx_strength > 0:
             job_store.set_stage(job_id, "removing_sfx", progress=88)
             final_path = directory / "instrumental.wav"

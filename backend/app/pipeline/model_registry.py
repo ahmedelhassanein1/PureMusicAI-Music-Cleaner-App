@@ -157,6 +157,9 @@ PRESETS: list[ModelPreset] = (
     _STARTER_PRESETS + _KARAOKE_PRESETS + _CLASSIC_PRESETS + _ENSEMBLE_PRESETS
 )
 
+DEFAULT_KARAOKE_MODEL_ID = "karaoke_mdx_kara2"
+REFERENCE_INSTRUMENTAL_MODEL_ID = "balanced"
+
 
 def get_preset(model_id: str) -> ModelPreset | None:
     for preset in PRESETS:
@@ -167,17 +170,28 @@ def get_preset(model_id: str) -> ModelPreset | None:
 
 def list_presets() -> list[dict[str, str | bool]]:
     """Curated presets for the default model picker (tasks 3.1 + 3.2)."""
-    return [
-        {
-            "id": p.id,
-            "name": p.name,
-            "description": p.description,
-            "arch": p.arch,
-            "category": p.category,
-            "is_karaoke": p.is_karaoke,
-        }
-        for p in PRESETS
-    ]
+    return [_preset_to_dict(p) for p in PRESETS]
+
+
+def list_karaoke_presets() -> list[dict[str, str | bool]]:
+    """Karaoke-only presets for the choir-preservation sub-model dropdown."""
+    return [_preset_to_dict(p) for p in PRESETS if p.is_karaoke and p.model_filename]
+
+
+def is_separable_preset(preset: ModelPreset) -> bool:
+    """True when audio-separator can run this preset on its own."""
+    return bool(preset.model_filename)
+
+
+def _preset_to_dict(preset: ModelPreset) -> dict[str, str | bool]:
+    return {
+        "id": preset.id,
+        "name": preset.name,
+        "description": preset.description,
+        "arch": preset.arch,
+        "category": preset.category,
+        "is_karaoke": preset.is_karaoke,
+    }
 
 
 def list_all_models() -> list[dict[str, Any]]:

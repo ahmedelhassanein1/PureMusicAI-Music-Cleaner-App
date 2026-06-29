@@ -17,6 +17,9 @@ _MANAGED_STEMS = frozenset(
     {
         "instrumental_raw.wav",
         "instrumental.wav",
+        "karaoke_instrumental_raw.wav",
+        "choir_candidate.wav",
+        "choir_preserved.wav",
         "vocals_stem.wav",
         "after_vocals.wav",
     }
@@ -45,13 +48,18 @@ def separate_instrumental(
     return instrumental
 
 
-def canonicalize_instrumental(uvr_path: Path, output_dir: Path) -> Path:
+def canonicalize_instrumental(
+    uvr_path: Path,
+    output_dir: Path,
+    *,
+    dest_name: str = "instrumental_raw.wav",
+) -> Path:
     """
     Copy the UVR instrumental stem to a stable path for download / post-processing.
 
     Uses copy (not move) so the original UVR-named file remains in the job folder.
     """
-    canonical = output_dir / "instrumental_raw.wav"
+    canonical = output_dir / dest_name
     if uvr_path.resolve() != canonical.resolve():
         shutil.copy2(uvr_path, canonical)
     logger.info("Canonical instrumental: %s (from %s)", canonical.name, uvr_path.name)

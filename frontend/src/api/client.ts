@@ -3,6 +3,15 @@ export type ModelPreset = {
   name: string;
   description: string;
   arch: string;
+  category: string;
+  is_karaoke: boolean;
+};
+
+export type ModelsResponse = {
+  source: string;
+  models: ModelPreset[];
+  karaoke_models?: ModelPreset[];
+  default_karaoke_model_id?: string;
 };
 
 export type JobStatus = {
@@ -11,6 +20,8 @@ export type JobStatus = {
   stage: string;
   progress: number;
   model_id: string;
+  karaoke_model_id?: string;
+  choir_aggressiveness?: number;
   original_filename: string;
   output_filename: string | null;
   error: string | null;
@@ -18,21 +29,35 @@ export type JobStatus = {
 
 const API_BASE = "/api";
 
-export async function fetchModels(): Promise<ModelPreset[]> {
+export async function fetchModels(): Promise<ModelsResponse> {
   const res = await fetch(`${API_BASE}/models`);
   if (!res.ok) throw new Error("Failed to load models");
-  const data = await res.json();
-  return data.models;
+  return res.json();
 }
 
 export async function uploadAudio(
   file: File,
   modelId: string,
-  sfxStrength = 1.0,
+  options: {
+    sfxStrength?: number;
+    karaokeModelId?: string;
+    choirAggressiveness?: number;
+  } = {},
 ): Promise<{ job_id: string }> {
+  const {
+    sfxStrength = 1.0,
+    karaokeModelId = "karaoke_mdx_kara2",
+    choirAggressiveness = 0,
+  } = options;
+
   const form = new FormData();
   form.append("file", file);
   form.append("model_id", modelId);
+  form.append("karaoke_model_id", karaokeModelId);
+  form.append(
+    "choir_aggressiveness",
+    String(Math.max(0, Math.min(1, choirAggressiveness))),
+  );
   form.append("sfx_strength", String(Math.max(0, Math.min(1, sfxStrength))));
 
   const res = await fetch(`${API_BASE}/upload`, {
