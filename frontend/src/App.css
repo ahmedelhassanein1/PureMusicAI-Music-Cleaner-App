@@ -361,6 +361,39 @@ body {
   display: block;
 }
 
+.field-control {
+  display: block;
+  margin-bottom: 1.25rem;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.field-control select {
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.field-control select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.field-control select:focus {
+  outline: 2px solid var(--accent-glow);
+  border-color: var(--accent);
+}
+
 .slider-header {
   display: flex;
   justify-content: space-between;

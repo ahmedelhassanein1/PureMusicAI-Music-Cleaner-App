@@ -19,6 +19,8 @@ from app.settings import settings
 PIPELINE_STAGES = (
     "queued",
     "separating",
+    "separating_karaoke",
+    "preserving_choir",
     "detecting_sfx",
     "removing_sfx",
     "done",

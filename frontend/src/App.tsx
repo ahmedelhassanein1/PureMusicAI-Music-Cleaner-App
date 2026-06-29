@@ -11,6 +11,8 @@ const STAGE_LABELS: Record<string, string> = {
   queued: "Waiting in queue",
   loading_model: "Loading model weights",
   separating: "Separating vocals from music",
+  separating_karaoke: "Running karaoke separation for choir",
+  preserving_choir: "Preserving backing vocals and choir",
   detecting_sfx: "Scanning for sound effects",
   removing_sfx: "Reducing detected sound effects",
   finalizing: "Finalizing output",
@@ -19,7 +21,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 function formatStage(stage: string): string {
-  return STAGE_LABELS[stage] ?? stage.replace(/_/g, " "); 
+  return STAGE_LABELS[stage] ?? stage.replace(/_/g, " ");
 }
 
 function progressBarLabel(stage: string, status: string): string {
@@ -31,9 +33,16 @@ function progressBarLabel(stage: string, status: string): string {
   return "Processing…";
 }
 
+function isMainGridModel(model: ModelPreset): boolean {
+  return !model.is_karaoke && model.category !== "ensemble";
+}
+
 export default function App() {
   const [models, setModels] = useState<ModelPreset[]>([]);
+  const [karaokeModels, setKaraokeModels] = useState<ModelPreset[]>([]);
   const [modelId, setModelId] = useState("balanced");
+  const [karaokeModelId, setKaraokeModelId] = useState("karaoke_mdx_kara2");
+  const [choirAggressiveness, setChoirAggressiveness] = useState(0);
   const [sfxStrength, setSfxStrength] = useState(100);
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -42,6 +51,8 @@ export default function App() {
   const [status, setStatus] = useState<string>("idle");
   const [error, setError] = useState<string | null>(null);
 
+  const mainModels = models.filter(isMainGridModel);
+
   const isBusy =
     status === "uploading" ||
     status === "queued" ||
@@ -49,9 +60,23 @@ export default function App() {
 
   useEffect(() => {
     fetchModels()
-      .then((list) => {
+      .then((data) => {
+        const list = data.models;
+        const karaoke = data.karaoke_models ?? list.filter((m) => m.is_karaoke);
         setModels(list);
-        if (list.length > 0) setModelId(list[0].id);
+        setKaraokeModels(karaoke);
+
+        const mains = list.filter(isMainGridModel);
+        if (mains.length > 0) {
+          const preferred = mains.find((m) => m.id === "balanced") ?? mains[0];
+          setModelId(preferred.id);
+        }
+
+        const defaultKaraoke =
+          data.default_karaoke_model_id ??
+          karaoke.find((m) => m.id === "karaoke_mdx_kara2")?.id ??
+          karaoke[0]?.id;
+        if (defaultKaraoke) setKaraokeModelId(defaultKaraoke);
       })
       .catch((err) => setError(String(err)));
   }, []);
@@ -99,7 +124,11 @@ export default function App() {
     setStatus("uploading");
 
     try {
-      const result = await uploadAudio(file, modelId, sfxStrength / 100);
+      const result = await uploadAudio(file, modelId, {
+        sfxStrength: sfxStrength / 100,
+        karaokeModelId,
+        choirAggressiveness: choirAggressiveness / 100,
+      });
       setJobId(result.job_id);
       setStatus("queued");
     } catch (err) {
@@ -108,12 +137,13 @@ export default function App() {
     }
   }
 
-  const selectedModel = models.find((m) => m.id === modelId);
+  const selectedModel = mainModels.find((m) => m.id === modelId);
+  const selectedKaraoke = karaokeModels.find((m) => m.id === karaokeModelId);
 
   return (
     <div className="app-shell">
       <header className="uvr-header">
-        <span className="uvr-badge">Phase 1 · Local</span>
+        <span className="uvr-badge">Phase 3 · Local</span>
         <h1>Music Cleaner</h1>
         <p>
           Free, open-source vocal separation in your browser — powered by
@@ -151,7 +181,7 @@ export default function App() {
         <section className="panel-section">
           <h2 className="section-title">Separation model</h2>
           <div className="model-grid" role="radiogroup" aria-label="Model">
-            {models.map((m) => (
+            {mainModels.map((m) => (
               <label
                 key={m.id}
                 className={`model-option${modelId === m.id ? " selected" : ""}`}
@@ -172,6 +202,52 @@ export default function App() {
               </label>
             ))}
           </div>
+        </section>
+
+        <section className="panel-section">
+          <h2 className="section-title">Choir preservation</h2>
+          <label className="field-control" htmlFor="karaoke-model">
+            <span className="field-label">Karaoke sub-model</span>
+            <select
+              id="karaoke-model"
+              value={karaokeModelId}
+              onChange={(e) => setKaraokeModelId(e.target.value)}
+              disabled={isBusy || karaokeModels.length === 0}
+            >
+              {karaokeModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <p className="slider-hint">
+              {selectedKaraoke?.description ??
+                "Karaoke UVR model used to extract backing vocals and choir."}
+            </p>
+          </label>
+
+          <label className="slider-control" htmlFor="choir-aggressiveness">
+            <div className="slider-header">
+              <span>Choir aggressiveness</span>
+              <span className="slider-value">{choirAggressiveness}%</span>
+            </div>
+            <input
+              id="choir-aggressiveness"
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={choirAggressiveness}
+              onChange={(e) =>
+                setChoirAggressiveness(Number(e.target.value))
+              }
+              disabled={isBusy}
+            />
+            <p className="slider-hint">
+              0% skips choir preservation · 100% fully re-adds detected backing
+              and choir from the karaoke stem
+            </p>
+          </label>
         </section>
 
         <section className="panel-section">
@@ -201,13 +277,15 @@ export default function App() {
         <div className="action-row">
           <span className="action-hint">
             {selectedModel
-              ? `${selectedModel.name} selected`
+              ? choirAggressiveness > 0
+                ? `${selectedModel.name} + ${selectedKaraoke?.name ?? "karaoke"} choir`
+                : `${selectedModel.name} selected`
               : "Loading models…"}
           </span>
           <button
             type="submit"
             className="btn-primary"
-            disabled={!file || isBusy || models.length === 0}
+            disabled={!file || isBusy || mainModels.length === 0}
           >
             {status === "uploading"
               ? "Uploading…"
@@ -242,6 +320,15 @@ export default function App() {
                 {selectedModel?.name ?? modelId}
               </span>
             </div>
+            {choirAggressiveness > 0 && (
+              <div className="meta-item">
+                <span className="meta-label">Choir</span>
+                <span className="meta-value">
+                  {selectedKaraoke?.name ?? karaokeModelId} ·{" "}
+                  {choirAggressiveness}%
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="progress-wrap">
