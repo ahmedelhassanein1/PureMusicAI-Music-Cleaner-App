@@ -34,6 +34,7 @@ RUN mkdir -p /root/panns_data \
         "https://zenodo.org/record/3987831/files/Cnn14_mAP%3D0.431.pth?download=1"
 
 COPY app ./app
+COPY scripts ./scripts
 
 ENV JOBS_DIR=/app/jobs
 ENV MODELS_DIR=/app/models
