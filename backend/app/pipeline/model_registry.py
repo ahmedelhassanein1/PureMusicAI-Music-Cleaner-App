@@ -103,7 +103,7 @@ _CLASSIC_PRESETS: list[ModelPreset] = [
         category="classic",
     ),
     ModelPreset(
-        id="classic_hp5",
+        id="classic_hp2_9",
         name="Classic HP2-9",
         description="VR HP2 series (9_HP2-UVR). Strongest classic instrumental SDR in the HP2 lineup.",
         model_filename="9_HP2-UVR.pth",
