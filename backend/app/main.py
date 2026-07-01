@@ -4,7 +4,8 @@ FastAPI application — upload, job status, download.
 Pipeline per job:
   1. UVR instrumental separation → instrumental_raw.wav (standard bed)
   2. Optional choir preservation (karaoke stem + heuristics) when enabled
-  3. SFX detection + attenuation → instrumental.wav (only when SFX are found)
+  3. SFX detection
+  4. Remix (choir overlay + SFX) → final downloadable WAV
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app import job_store
-from app.pipeline.choir import preserve_choir
+from app.pipeline.choir import extract_choir_candidate
+from app.pipeline.remix import RemixPlan, finalize_instrumental
 from app.pipeline.model_registry import (
     DEFAULT_KARAOKE_MODEL_ID,
     REFERENCE_INSTRUMENTAL_MODEL_ID,
@@ -30,13 +32,13 @@ from app.pipeline.model_registry import (
     list_presets,
 )
 from app.pipeline.separator import canonicalize_instrumental, separate_instrumental
-from app.pipeline.sfx import attenuate_sfx, detect_sfx_segments
+from app.pipeline.sfx import detect_sfx_segments
 from app.settings import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Music Cleaner API", version="0.3.1")
+app = FastAPI(title="Music Cleaner API", version="0.3.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -217,10 +219,10 @@ def _run_pipeline(
     sfx_strength: float,
 ) -> None:
     """
-    Background worker: UVR separation → optional choir → optional SFX cleanup.
+    Background worker: UVR separation → optional choir → SFX scan → remix finalize.
 
-    Download defaults to instrumental_raw.wav (UVR / choir stem). instrumental.wav
-    is only served when SFX regions were actually detected and attenuated.
+    Download defaults to instrumental_raw.wav. instrumental.wav is used when SFX
+    regions were detected and attenuated during the remix step.
     """
     try:
         standard_preset, karaoke_preset, choir_aggressiveness, choir_enabled = (
@@ -248,9 +250,9 @@ def _run_pipeline(
             progress_callback=on_standard_separate,
         )
         work_path = canonicalize_instrumental(uvr_output, directory)
-        download_name = "instrumental_raw.wav"
+        choir_candidate_path: Path | None = None
 
-        # --- Step 2: optional choir preservation via karaoke stem ---
+        # --- Step 2: optional choir candidate extraction ---
         if choir_enabled and karaoke_preset is not None:
             job_store.set_stage(job_id, "separating_karaoke", progress=38)
 
@@ -271,18 +273,15 @@ def _run_pipeline(
             )
 
             job_store.set_stage(job_id, "preserving_choir", progress=62)
-            choir_output = directory / "choir_preserved.wav"
-            preserve_choir(
-                work_path,
+            choir_candidate_path = directory / "choir_candidate.wav"
+            extract_choir_candidate(
                 karaoke_path,
-                choir_output,
-                aggressiveness=choir_aggressiveness,
+                work_path,
+                choir_candidate_path,
             )
-            shutil.copy2(choir_output, work_path)
             logger.info(
-                "Job %s: choir preserved (aggressiveness=%.2f, karaoke=%s)",
+                "Job %s: choir candidate extracted (karaoke=%s)",
                 job_id,
-                choir_aggressiveness,
                 karaoke_preset.id,
             )
 
@@ -297,18 +296,24 @@ def _run_pipeline(
         if fired_labels:
             logger.info("Job %s SFX classes detected: %s", job_id, fired_labels)
 
-        # --- Step 4: Attenuate SFX only when something was detected ---
-        if sfx_segments and sfx_strength > 0:
-            job_store.set_stage(job_id, "removing_sfx", progress=88)
-            final_path = directory / "instrumental.wav"
-            attenuate_sfx(
-                work_path,
-                final_path,
-                strength=sfx_strength,
-                segments=sfx_segments,
+        # --- Step 4: Remix stems → final WAV ---
+        apply_sfx = bool(sfx_segments) and sfx_strength > 0
+        download_name = "instrumental.wav" if apply_sfx else "instrumental_raw.wav"
+        final_path = directory / download_name
+
+        job_store.set_stage(job_id, "remixing", progress=88)
+        finalize_instrumental(
+            RemixPlan(
+                instrumental_path=work_path,
+                output_path=final_path,
+                choir_path=choir_candidate_path,
+                choir_gain=choir_aggressiveness if choir_enabled else 0.0,
+                sfx_segments=tuple(sfx_segments),
+                sfx_strength=sfx_strength if apply_sfx else 0.0,
             )
-            download_name = "instrumental.wav"
-        else:
+        )
+
+        if not apply_sfx:
             logger.info("Job %s: no SFX to remove — download will use UVR stem", job_id)
 
         job_store.set_stage(

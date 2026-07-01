@@ -22,6 +22,7 @@ PIPELINE_STAGES = (
     "separating_karaoke",
     "preserving_choir",
     "detecting_sfx",
+    "remixing",
     "removing_sfx",
     "done",
     "error",
