@@ -20,6 +20,8 @@ _MANAGED_STEMS = frozenset(
         "karaoke_instrumental_raw.wav",
         "choir_candidate.wav",
         "choir_preserved.wav",
+        "_remix_pre_sfx.wav",
+        "_remix_mix.wav",
         "vocals_stem.wav",
         "after_vocals.wav",
     }
