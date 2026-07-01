@@ -14,6 +14,7 @@ const STAGE_LABELS: Record<string, string> = {
   separating_karaoke: "Running karaoke separation for choir",
   preserving_choir: "Preserving backing vocals and choir",
   detecting_sfx: "Scanning for sound effects",
+  remixing: "Mixing stems into final output",
   removing_sfx: "Reducing detected sound effects",
   finalizing: "Finalizing output",
   done: "Processing complete",
