@@ -175,11 +175,24 @@ def list_presets() -> list[dict[str, str | bool]]:
 
 def list_karaoke_presets() -> list[dict[str, str | bool]]:
     """Karaoke-only presets for the choir-preservation sub-model dropdown."""
-    return [_preset_to_dict(p) for p in PRESETS if p.is_karaoke and p.model_filename]
+    return [_preset_to_dict(p) for p in PRESETS if p.category == "karaoke"]
+
+
+def is_ensemble_preset(preset: ModelPreset) -> bool:
+    """True when this preset runs audio-separator's multi-model ensemble path."""
+    if preset.arch == "ensemble":
+        return True
+    if preset.ensemble_preset:
+        return True
+    return bool(preset.model_filename and preset.extra_model_filenames)
 
 
 def is_separable_preset(preset: ModelPreset) -> bool:
-    """True when audio-separator can run this preset on its own."""
+    """True when audio-separator can run this preset."""
+    if preset.ensemble_preset:
+        return True
+    if preset.model_filename and preset.extra_model_filenames:
+        return True
     return bool(preset.model_filename)
 
 

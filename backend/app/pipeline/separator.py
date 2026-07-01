@@ -7,7 +7,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from app.pipeline.model_registry import ModelPreset
+from app.pipeline.model_registry import ModelPreset, is_ensemble_preset
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -37,12 +37,13 @@ def separate_instrumental(
     """
     Run UVR separation and return the path to the instrumental WAV.
 
-    audio-separator writes multiple stems; we pick the instrumental file.
+    Supports single models and audio-separator ensemble presets / multi-model
+    ensembling configured on ``ModelPreset``.
     """
     output_files = _separate(
         input_path=input_path,
         output_dir=output_dir,
-        model_filename=preset.model_filename,
+        preset=preset,
         progress_callback=progress_callback,
     )
     instrumental = _pick_instrumental(output_files, output_dir)
@@ -78,7 +79,7 @@ def separate_vocals(
     output_files = _separate(
         input_path=input_path,
         output_dir=output_dir,
-        model_filename=model_filename,
+        preset=_single_model_preset(model_filename),
         progress_callback=progress_callback,
     )
     vocals = _pick_vocals(output_files, output_dir)
@@ -86,10 +87,21 @@ def separate_vocals(
     return vocals
 
 
+def _single_model_preset(model_filename: str) -> ModelPreset:
+    """Minimal preset wrapper for call sites that only have a filename."""
+    return ModelPreset(
+        id="adhoc",
+        name="adhoc",
+        description="",
+        model_filename=model_filename,
+        arch="mdx",
+    )
+
+
 def _separate(
     input_path: Path,
     output_dir: Path,
-    model_filename: str,
+    preset: ModelPreset,
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> list[str]:
     if progress_callback:
@@ -97,13 +109,37 @@ def _separate(
 
     from audio_separator.separator import Separator
 
-    separator = Separator(
-        output_dir=str(output_dir),
-        output_format="WAV",
-        model_file_dir=str(settings.models_dir),
-    )
+    separator_kwargs: dict[str, str] = {
+        "output_dir": str(output_dir),
+        "output_format": "WAV",
+        "model_file_dir": str(settings.models_dir),
+    }
 
-    separator.load_model(model_filename=model_filename)
+    if preset.ensemble_preset:
+        separator_kwargs["ensemble_preset"] = preset.ensemble_preset
+        logger.info(
+            "Loading ensemble preset %s (algorithm=%s)",
+            preset.ensemble_preset,
+            preset.ensemble_algorithm,
+        )
+    elif is_ensemble_preset(preset):
+        separator_kwargs["ensemble_algorithm"] = preset.ensemble_algorithm
+        logger.info(
+            "Loading custom ensemble: %s + %s (%s)",
+            preset.model_filename,
+            ", ".join(preset.extra_model_filenames),
+            preset.ensemble_algorithm,
+        )
+
+    separator = Separator(**separator_kwargs)
+
+    if preset.ensemble_preset:
+        separator.load_model()
+    elif preset.extra_model_filenames:
+        model_filenames = [preset.model_filename, *preset.extra_model_filenames]
+        separator.load_model(model_filename=model_filenames)
+    else:
+        separator.load_model(model_filename=preset.model_filename)
 
     if progress_callback:
         progress_callback(25, "separating")

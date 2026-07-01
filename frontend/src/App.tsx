@@ -35,7 +35,7 @@ function progressBarLabel(stage: string, status: string): string {
 }
 
 function isMainGridModel(model: ModelPreset): boolean {
-  return !model.is_karaoke && model.category !== "ensemble";
+  return model.category !== "karaoke";
 }
 
 export default function App() {

@@ -185,7 +185,7 @@ def _resolve_pipeline_presets(
     karaoke_preset = get_preset(karaoke_model_id)
     aggressiveness = choir_aggressiveness
 
-    if preset.is_karaoke:
+    if preset.category == "karaoke":
         karaoke_preset = preset
         reference = get_preset(REFERENCE_INSTRUMENTAL_MODEL_ID)
         if reference is None or not is_separable_preset(reference):
@@ -196,15 +196,12 @@ def _resolve_pipeline_presets(
     else:
         standard_preset = preset
         if not is_separable_preset(standard_preset):
-            raise ValueError(
-                f"Model {model_id} cannot run standalone separation "
-                "(ensemble presets are not wired yet)"
-            )
+            raise ValueError(f"Model {model_id} cannot run separation")
 
     choir_enabled = (
         aggressiveness > 0.0
         and karaoke_preset is not None
-        and karaoke_preset.is_karaoke
+        and karaoke_preset.category == "karaoke"
         and is_separable_preset(karaoke_preset)
     )
     return standard_preset, karaoke_preset if choir_enabled else None, aggressiveness, choir_enabled
