@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir \
     torch==2.5.1 \
     torchvision==0.20.1 \
     torchaudio==2.5.1 \
-    --index-url https://download.pytorch.org/whl/cpu
+    --index-url https://download.pytorch.org/whl/cu124
 
 RUN pip install --no-cache-dir -r requirements.txt
 
