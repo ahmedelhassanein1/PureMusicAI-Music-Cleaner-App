@@ -38,6 +38,8 @@ function isMainGridModel(model: ModelPreset): boolean {
   return model.category !== "karaoke";
 }
 
+const ACTIVE_JOB_KEY = "music-cleaner-active-job";
+
 export default function App() {
   const [models, setModels] = useState<ModelPreset[]>([]);
   const [karaokeModels, setKaraokeModels] = useState<ModelPreset[]>([]);
@@ -47,6 +49,7 @@ export default function App() {
   const [sfxStrength, setSfxStrength] = useState(100);
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [jobModelId, setJobModelId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState("");
   const [status, setStatus] = useState<string>("idle");
@@ -59,6 +62,23 @@ export default function App() {
     status === "queued" ||
     status === "processing";
 
+  // Restore in-progress job after a page reload (Vite HMR, docker restart, etc.).
+  useEffect(() => {
+    const saved = sessionStorage.getItem(ACTIVE_JOB_KEY);
+    if (saved) {
+      setJobId(saved);
+      setStatus("processing");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (jobId) {
+      sessionStorage.setItem(ACTIVE_JOB_KEY, jobId);
+    } else {
+      sessionStorage.removeItem(ACTIVE_JOB_KEY);
+    }
+  }, [jobId]);
+
   useEffect(() => {
     fetchModels()
       .then((data) => {
@@ -69,15 +89,22 @@ export default function App() {
 
         const mains = list.filter(isMainGridModel);
         if (mains.length > 0) {
-          const preferred = mains.find((m) => m.id === "balanced") ?? mains[0];
-          setModelId(preferred.id);
+          setModelId((current) =>
+            mains.some((m) => m.id === current)
+              ? current
+              : (mains.find((m) => m.id === "balanced") ?? mains[0]).id,
+          );
         }
 
         const defaultKaraoke =
           data.default_karaoke_model_id ??
           karaoke.find((m) => m.id === "karaoke_mdx_kara2")?.id ??
           karaoke[0]?.id;
-        if (defaultKaraoke) setKaraokeModelId(defaultKaraoke);
+        if (defaultKaraoke) {
+          setKaraokeModelId((current) =>
+            karaoke.some((m) => m.id === current) ? current : defaultKaraoke,
+          );
+        }
       })
       .catch((err) => setError(String(err)));
   }, []);
@@ -86,22 +113,43 @@ export default function App() {
     if (!jobId || status === "completed" || status === "failed") return;
 
     let cancelled = false;
+    let pollFailures = 0;
 
     async function poll() {
       try {
         const job = await fetchJob(jobId!);
         if (cancelled) return;
 
+        pollFailures = 0;
         setProgress(job.progress);
         setStage(job.stage);
         setStatus(job.status);
+        setJobModelId(job.model_id);
         setError(job.error);
 
         if (job.status === "completed") {
           setError(null);
         }
-      } catch {
+        if (job.status === "failed") {
+          sessionStorage.removeItem(ACTIVE_JOB_KEY);
+        }
+      } catch (err) {
         if (cancelled) return;
+        pollFailures += 1;
+        const message = String(err);
+        if (message.includes("Job not found")) {
+          setStatus("failed");
+          setError(
+            "Job not found — the jobs folder may have been cleared while this was running.",
+          );
+          sessionStorage.removeItem(ACTIVE_JOB_KEY);
+          return;
+        }
+        if (pollFailures >= 5) {
+          setError(
+            "Lost contact with the backend. The job may still be running — check docker compose logs. Do not refresh.",
+          );
+        }
       }
     }
 
@@ -120,6 +168,7 @@ export default function App() {
 
     setError(null);
     setJobId(null);
+    setJobModelId(null);
     setProgress(0);
     setStage("");
     setStatus("uploading");
@@ -140,6 +189,12 @@ export default function App() {
 
   const selectedModel = mainModels.find((m) => m.id === modelId);
   const selectedKaraoke = karaokeModels.find((m) => m.id === karaokeModelId);
+  const activeJobModel =
+    models.find((m) => m.id === jobModelId) ??
+    mainModels.find((m) => m.id === jobModelId);
+  const isEnsembleJob =
+    jobModelId?.startsWith("ensemble_") ||
+    activeJobModel?.category === "ensemble";
 
   return (
     <div className="app-shell">
@@ -318,7 +373,7 @@ export default function App() {
             <div className="meta-item">
               <span className="meta-label">Model</span>
               <span className="meta-value">
-                {selectedModel?.name ?? modelId}
+                {activeJobModel?.name ?? jobModelId ?? selectedModel?.name ?? modelId}
               </span>
             </div>
             {choirAggressiveness > 0 && (
@@ -345,6 +400,12 @@ export default function App() {
                 style={{ width: `${progress}%` }}
               />
             </div>
+            {isEnsembleJob && status === "processing" && progress < 70 && (
+              <p className="slider-hint">
+                Ensemble models run two full separation passes — progress stays
+                low for a long time. This can take 30–60+ minutes on long tracks.
+              </p>
+            )}
           </div>
 
           {status === "completed" && (
