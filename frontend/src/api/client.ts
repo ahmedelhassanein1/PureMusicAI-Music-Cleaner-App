@@ -73,6 +73,9 @@ export async function uploadAudio(
 
 export async function fetchJob(jobId: string): Promise<JobStatus> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}`);
+  if (res.status === 404) {
+    throw new Error("Job not found");
+  }
   if (!res.ok) throw new Error("Failed to fetch job status");
   return res.json();
 }
