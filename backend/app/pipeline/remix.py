@@ -8,11 +8,14 @@ processing step before marking a job complete.
 Phase 4 polish (tasks 4.1–4.2):
   - Cosine crossfades at SFX segment boundaries (no clicks between bed and ducked regions)
   - Peak normalization to -1 dBFS before write
+
+Phase 4.3 — MP3 export via ffmpeg (on-demand at download; WAV remains the pipeline master).
 """
 
 from __future__ import annotations
 
 import logging
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +30,10 @@ logger = logging.getLogger(__name__)
 TARGET_PEAK_DBFS = -1.0
 CROSSFADE_MS = 20.0
 SFX_PADDING_SEC = 0.03
+
+# Phase 4.3 — MP3 download defaults.
+DEFAULT_MP3_BITRATE_KBPS = 192
+ALLOWED_MP3_BITRATES = frozenset({192, 320})
 
 
 @dataclass(frozen=True)
@@ -92,6 +99,58 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
         TARGET_PEAK_DBFS,
     )
     return plan.output_path
+
+
+def export_mp3(
+    wav_path: Path,
+    mp3_path: Path,
+    *,
+    bitrate_kbps: int = DEFAULT_MP3_BITRATE_KBPS,
+) -> Path:
+    """
+    4.3 — Encode a normalized WAV master to MP3 using ffmpeg (libmp3lame).
+
+    Skips re-encoding when an up-to-date MP3 already exists beside the WAV.
+    """
+    if bitrate_kbps not in ALLOWED_MP3_BITRATES:
+        raise ValueError(
+            f"Unsupported MP3 bitrate {bitrate_kbps}; use one of {sorted(ALLOWED_MP3_BITRATES)}"
+        )
+    if not wav_path.exists():
+        raise FileNotFoundError(f"WAV source not found: {wav_path}")
+
+    if mp3_path.exists() and mp3_path.stat().st_mtime >= wav_path.stat().st_mtime:
+        logger.info("Reusing cached MP3 %s", mp3_path.name)
+        return mp3_path
+
+    mp3_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(wav_path),
+        "-codec:a",
+        "libmp3lame",
+        "-b:a",
+        f"{bitrate_kbps}k",
+        str(mp3_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        raise RuntimeError(f"ffmpeg MP3 export failed: {detail}") from exc
+
+    logger.info("Exported %s → %s (%dk)", wav_path.name, mp3_path.name, bitrate_kbps)
+    return mp3_path
+
+
+def mp3_cache_path(wav_path: Path, bitrate_kbps: int) -> Path:
+    """Derive a cached MP3 path next to the WAV master (e.g. instrumental_raw_192k.mp3)."""
+    return wav_path.with_name(f"{wav_path.stem}_{bitrate_kbps}k.mp3")
 
 
 def mix_stems(
