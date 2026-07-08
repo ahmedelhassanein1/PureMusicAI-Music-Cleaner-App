@@ -4,6 +4,7 @@ import {
   fetchJob,
   fetchModels,
   ModelPreset,
+  Mp3Bitrate,
   uploadAudio,
 } from "./api/client";
 
@@ -47,6 +48,7 @@ export default function App() {
   const [karaokeModelId, setKaraokeModelId] = useState("karaoke_mdx_kara2");
   const [choirAggressiveness, setChoirAggressiveness] = useState(0);
   const [sfxStrength, setSfxStrength] = useState(100);
+  const [mp3Bitrate, setMp3Bitrate] = useState<Mp3Bitrate>(192);
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobModelId, setJobModelId] = useState<string | null>(null);
@@ -330,6 +332,38 @@ export default function App() {
           </label>
         </section>
 
+        <section className="panel-section">
+          <h2 className="section-title">Download format</h2>
+          <fieldset className="bitrate-options" disabled={isBusy}>
+            <legend className="field-label">MP3 bitrate (default download)</legend>
+            <label className="bitrate-option">
+              <input
+                type="radio"
+                name="mp3-bitrate"
+                value={192}
+                checked={mp3Bitrate === 192}
+                onChange={() => setMp3Bitrate(192)}
+              />
+              192 kbps — smaller files
+            </label>
+            <label className="bitrate-option">
+              <input
+                type="radio"
+                name="mp3-bitrate"
+                value={320}
+                checked={mp3Bitrate === 320}
+                onChange={() => setMp3Bitrate(320)}
+              />
+              320 kbps — higher quality
+            </label>
+          </fieldset>
+          <p className="slider-hint">
+            Processed audio is saved as WAV internally; your download is MP3 at
+            the selected bitrate. Use “Download WAV” after processing for the
+            lossless file.
+          </p>
+        </section>
+
         <div className="action-row">
           <span className="action-hint">
             {selectedModel
@@ -409,9 +443,22 @@ export default function App() {
           </div>
 
           {status === "completed" && (
-            <a className="btn-download" href={downloadUrl(jobId)} download>
-              ↓ Save instrumental
-            </a>
+            <div className="download-actions">
+              <a
+                className="btn-download"
+                href={downloadUrl(jobId, { format: "mp3", bitrate: mp3Bitrate })}
+                download
+              >
+                ↓ Save instrumental (MP3 {mp3Bitrate}k)
+              </a>
+              <a
+                className="btn-download btn-download-secondary"
+                href={downloadUrl(jobId, { format: "wav" })}
+                download
+              >
+                Download WAV
+              </a>
+            </div>
           )}
 
           {error && <div className="error-box">{error}</div>}
