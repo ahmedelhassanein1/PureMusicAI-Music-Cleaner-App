@@ -5,7 +5,7 @@ Pipeline per job:
   1. UVR instrumental separation → instrumental_raw.wav (standard bed)
   2. Optional choir preservation (karaoke stem + heuristics) when enabled
   3. SFX detection
-  4. Remix (choir overlay + SFX) → final downloadable WAV
+  4. Remix (choir overlay + SFX) → final downloadable WAV (MP3 on download)
 """
 
 from __future__ import annotations
@@ -20,7 +20,14 @@ from fastapi.responses import FileResponse
 
 from app import job_store
 from app.pipeline.choir import extract_choir_candidate
-from app.pipeline.remix import RemixPlan, finalize_instrumental
+from app.pipeline.remix import (
+    ALLOWED_MP3_BITRATES,
+    DEFAULT_MP3_BITRATE_KBPS,
+    RemixPlan,
+    export_mp3,
+    finalize_instrumental,
+    mp3_cache_path,
+)
 from app.pipeline.model_registry import (
     DEFAULT_KARAOKE_MODEL_ID,
     REFERENCE_INSTRUMENTAL_MODEL_ID,
@@ -38,7 +45,7 @@ from app.settings import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Music Cleaner API", version="0.3.2")
+app = FastAPI(title="Music Cleaner API", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -145,7 +152,17 @@ def job_status(job_id: str) -> dict:
 
 
 @app.get("/api/jobs/{job_id}/download")
-def download(job_id: str) -> FileResponse:
+def download(
+    job_id: str,
+    output_format: str = Query(default="mp3", alias="format", pattern="^(mp3|wav)$"),
+    bitrate: int = Query(default=DEFAULT_MP3_BITRATE_KBPS),
+) -> FileResponse:
+    """
+    Download the processed instrumental.
+
+    Default: MP3 via ffmpeg. Pass ``?format=wav`` for the lossless WAV master.
+    MP3 bitrates: ``?bitrate=192`` (default) or ``?bitrate=320``.
+    """
     status = job_store.get_job(job_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -156,14 +173,38 @@ def download(job_id: str) -> FileResponse:
     if not output_name:
         raise HTTPException(status_code=404, detail="Output file missing")
 
-    output_path = job_store.job_dir(job_id) / output_name
-    if not output_path.exists():
+    wav_path = job_store.job_dir(job_id) / output_name
+    if not wav_path.exists():
         raise HTTPException(status_code=404, detail="Output file not found on disk")
 
+    download_stem = Path(status["original_filename"]).stem
+
+    if output_format == "wav":
+        return FileResponse(
+            path=wav_path,
+            media_type="audio/wav",
+            filename=f"instrumental_{download_stem}.wav",
+        )
+
+    if bitrate not in ALLOWED_MP3_BITRATES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid bitrate {bitrate}; use 192 or 320",
+        )
+
+    try:
+        mp3_path = export_mp3(
+            wav_path,
+            mp3_cache_path(wav_path, bitrate),
+            bitrate_kbps=bitrate,
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     return FileResponse(
-        path=output_path,
-        media_type="audio/wav",
-        filename=f"instrumental_{status['original_filename']}",
+        path=mp3_path,
+        media_type="audio/mpeg",
+        filename=f"instrumental_{download_stem}.mp3",
     )
 
 

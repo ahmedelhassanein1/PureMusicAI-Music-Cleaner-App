@@ -80,6 +80,18 @@ export async function fetchJob(jobId: string): Promise<JobStatus> {
   return res.json();
 }
 
-export function downloadUrl(jobId: string): string {
-  return `${API_BASE}/jobs/${jobId}/download`;
+export type DownloadFormat = "mp3" | "wav";
+export type Mp3Bitrate = 192 | 320;
+
+export function downloadUrl(
+  jobId: string,
+  options: { format?: DownloadFormat; bitrate?: Mp3Bitrate } = {},
+): string {
+  const { format = "mp3", bitrate = 192 } = options;
+  const params = new URLSearchParams();
+  params.set("format", format);
+  if (format === "mp3") {
+    params.set("bitrate", String(bitrate));
+  }
+  return `${API_BASE}/jobs/${jobId}/download?${params.toString()}`;
 }
