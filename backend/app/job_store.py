@@ -8,12 +8,16 @@ so the frontend can show where a long-running job is in the pipeline.
 from __future__ import annotations
 
 import json
+import logging
+import shutil
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from app.settings import settings
+
+logger = logging.getLogger(__name__)
 
 # Valid `stage` values written to status.json during processing.
 PIPELINE_STAGES = (
@@ -40,6 +44,8 @@ def create_job(model_id: str, original_filename: str) -> dict[str, Any]:
     Each job gets a UUID directory under jobs/ with status.json tracking
     progress through the pipeline (UVR → SFX).
     """
+    delete_expired_jobs()
+
     job_id = str(uuid.uuid4())
     job_dir = settings.jobs_dir / job_id
     job_dir.mkdir(parents=True, exist_ok=False)
@@ -116,6 +122,57 @@ def set_stage(
 def job_dir(job_id: str) -> Path:
     """Return the filesystem path for a job's working directory."""
     return settings.jobs_dir / job_id
+
+
+def delete_expired_jobs(
+    max_age_hours: int | None = None,
+) -> int:
+    """
+    4.5 — Remove job folders older than ``max_age_hours`` (default from settings).
+
+    Uses ``created_at`` in each job's status.json. Returns the number of jobs deleted.
+    """
+    hours = max_age_hours if max_age_hours is not None else settings.job_retention_hours
+    if hours <= 0 or not settings.jobs_dir.exists():
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    deleted = 0
+
+    for job_path in settings.jobs_dir.iterdir():
+        if not job_path.is_dir():
+            continue
+        status_path = job_path / "status.json"
+        if not status_path.exists():
+            continue
+
+        try:
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            created_at = _parse_utc_timestamp(status.get("created_at"))
+        except (json.JSONDecodeError, ValueError, TypeError):
+            logger.warning("Skipping job folder with invalid status: %s", job_path.name)
+            continue
+
+        if created_at is None or created_at >= cutoff:
+            continue
+
+        shutil.rmtree(job_path)
+        deleted += 1
+        logger.info("Deleted expired job %s (created %s)", job_path.name, created_at.isoformat())
+
+    if deleted:
+        logger.info("Purged %d job(s) older than %d hour(s)", deleted, hours)
+    return deleted
+
+
+def _parse_utc_timestamp(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 timestamp from status.json into UTC."""
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _write_status(job_dir: Path, status: dict[str, Any]) -> None:
