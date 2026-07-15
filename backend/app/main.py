@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -45,7 +46,39 @@ from app.settings import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Music Cleaner API", version="0.4.0")
+# Phase 4.4 — allowed upload types (must match frontend accept list).
+ALLOWED_UPLOAD_SUFFIXES = frozenset({".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"})
+ALLOWED_UPLOAD_MIME_TYPES = frozenset(
+    {
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/wave",
+        "audio/flac",
+        "audio/x-flac",
+        "audio/mp4",
+        "audio/m4a",
+        "audio/x-m4a",
+        "audio/aac",
+        "audio/ogg",
+        "application/ogg",
+        "video/mp4",  # some browsers tag .m4a this way
+    }
+)
+_UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1 MB
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Run startup housekeeping (expired job purge)."""
+    purged = job_store.delete_expired_jobs()
+    if purged:
+        logger.info("Startup: removed %d expired job(s)", purged)
+    yield
+
+
+app = FastAPI(title="Music Cleaner API", version="0.4.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,6 +137,8 @@ async def upload(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
 
+    suffix = _validate_upload_file(file)
+
     choir_aggressiveness = float(max(0.0, min(1.0, choir_aggressiveness)))
     sfx_strength = float(max(0.0, min(1.0, sfx_strength)))
 
@@ -126,10 +161,14 @@ async def upload(
     )
 
     directory = job_store.job_dir(job_id)
-    suffix = Path(file.filename).suffix or ".wav"
     input_path = directory / f"input{suffix}"
-    with input_path.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    try:
+        bytes_written = await _save_upload_limited(file, input_path, settings.max_upload_bytes)
+    except _UploadTooLarge as exc:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+
+    logger.info("Saved upload for job %s (%d bytes, %s)", job_id, bytes_written, suffix)
 
     background_tasks.add_task(
         _run_pipeline,
@@ -206,6 +245,56 @@ def download(
         media_type="audio/mpeg",
         filename=f"instrumental_{download_stem}.mp3",
     )
+
+
+class _UploadTooLarge(Exception):
+    """Raised when an upload exceeds settings.max_upload_bytes."""
+
+
+def _validate_upload_file(file: UploadFile) -> str:
+    """
+    4.4 — Reject unsupported extensions and non-audio MIME types.
+
+    Returns the normalized lowercase suffix (e.g. ``.mp3``).
+    """
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+        allowed = ", ".join(sorted(ALLOWED_UPLOAD_SUFFIXES))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{suffix or '(none)'}'. Allowed: {allowed}",
+        )
+
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type and content_type not in ALLOWED_UPLOAD_MIME_TYPES:
+        if not content_type.startswith("audio/"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported content type '{content_type}'. Upload an audio file.",
+            )
+
+    return suffix
+
+
+async def _save_upload_limited(
+    file: UploadFile,
+    dest: Path,
+    max_bytes: int,
+) -> int:
+    """Stream upload to disk and enforce a maximum byte size."""
+    total = 0
+    with dest.open("wb") as buffer:
+        while True:
+            chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise _UploadTooLarge(
+                    f"File too large. Maximum upload size is {max_bytes // (1024 * 1024)} MB."
+                )
+            buffer.write(chunk)
+    return total
 
 
 def _resolve_pipeline_presets(
