@@ -39,38 +39,51 @@ body {
   padding: 2rem 1.25rem 3rem;
 }
 
-.uvr-header {
+.app-header {
   text-align: center;
   margin-bottom: 2rem;
 }
 
-.uvr-badge {
-  display: inline-block;
-  padding: 0.3rem 0.75rem;
-  margin-bottom: 0.75rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent);
-  background: var(--accent-dim);
-  border: 1px solid rgba(46, 204, 154, 0.25);
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
 }
 
-.uvr-header h1 {
+.brand-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.brand-title {
   margin: 0;
-  font-size: 2.25rem;
+  font-size: clamp(1.6rem, 4vw, 2.25rem);
   font-weight: 700;
   letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.brand-name {
   background: linear-gradient(180deg, #fff 30%, #a8b4c8);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-.uvr-header p {
-  margin: 0.6rem auto 0;
+.brand-tagline {
+  color: var(--text-muted);
+  -webkit-text-fill-color: var(--text-muted);
+  font-weight: 600;
+}
+
+.app-header p {
+  margin: 0 auto;
   max-width: 520px;
   color: var(--text-muted);
   font-size: 0.95rem;
@@ -558,8 +571,13 @@ body {
     padding-top: 1.25rem;
   }
 
-  .uvr-header h1 {
-    font-size: 1.65rem;
+  .brand-lockup {
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .brand-title {
+    font-size: 1.5rem;
   }
 
   .status-meta {

@@ -38,7 +38,9 @@ describe("App", () => {
   it("renders the main heading and loads models", async () => {
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: /music cleaner/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /puremusic ai.*music cleaner/i }),
+    ).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole("radio", { name: /balanced/i })).toBeInTheDocument();
       expect(screen.getByRole("radio", { name: /fast/i })).toBeInTheDocument();
