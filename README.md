@@ -1,4 +1,4 @@
-# Music Cleaner
+# PureMusic AI - Music Cleaner
 
 Clean up audio in your browser — remove lead vocals, spoken dialogue, and sound effects, while trying to keep choir and instrumental backing.
 
