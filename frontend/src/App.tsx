@@ -209,10 +209,7 @@ export default function App() {
             width={56}
             height={56}
           />
-          <h1 className="brand-title">
-            <span className="brand-name">PureMusic AI</span>
-            <span className="brand-tagline"> - Music Cleaner</span>
-          </h1>
+          <h1 className="brand-title">PureMusic AI - Music Cleaner</h1>
         </div>
         <p>
           Free, open-source vocal separation in your browser — powered by
