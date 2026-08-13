@@ -39,7 +39,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByRole("heading", { name: /puremusic ai.*music cleaner/i }),
+      screen.getByRole("heading", { name: "PureMusic AI - Music Cleaner" }),
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole("radio", { name: /balanced/i })).toBeInTheDocument();
