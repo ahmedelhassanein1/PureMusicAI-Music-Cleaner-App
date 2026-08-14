@@ -3,7 +3,7 @@
   <span style="font-size: 1.75rem; font-weight: 700; line-height: 1; white-space: nowrap;">PureMusic AI - Music Cleaner</span>
 </div>
 
-Remove lead vocals, dialogue, and SFX; keep choir and instrumental backing.  
+Remove lead vocals and dialogue; reduce sound effects (SFX); keep choir and instrumental backing.  
 Runs locally via **WSL + Docker** — free, no account, files stay on your machine.
 
 ---
@@ -11,11 +11,11 @@ Runs locally via **WSL + Docker** — free, no account, files stay on your machi
 ## What it does
 
 
-| Removed                                    | Kept                                                        |
+| Removed / reduced                          | Kept                                                        |
 | ------------------------------------------ | ----------------------------------------------------------- |
-| Lead vocals                                | Instrumental backing                                        |
-| Spoken dialogue                            | Choir / group vocals *(when choir preservation is enabled)* |
-| Sound effects (explosions, whooshes, etc.) | Musical content                                             |
+| Lead vocals *(removed)*                    | Instrumental backing                                        |
+| Spoken dialogue *(removed)*                | Choir / group vocals *(when choir preservation is enabled)* |
+| Sound effects *(reduced, not guaranteed)*  | Musical content                                             |
 
 
 **How it works in one sentence:** upload a song → AI separates and cleans stems → download an instrumental (MP3 or WAV).
