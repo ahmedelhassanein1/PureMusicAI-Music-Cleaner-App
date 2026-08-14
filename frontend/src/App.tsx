@@ -334,8 +334,8 @@ export default function App() {
               disabled={isBusy}
             />
             <p className="slider-hint">
-              0% keeps all SFX · 100% fully mutes detected explosions, whooshes,
-              and similar effects
+              0% keeps all SFX · 100% mutes detected explosions, whooshes, and
+              similar effects as much as possible
             </p>
           </label>
         </section>
