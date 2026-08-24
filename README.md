@@ -33,11 +33,11 @@ Screen recordings of the app in action. Links open in a new tab and play in your
 
 ### Demo 1 — Vocal removal
 
-<a href="https://github.com/ahmedelhassanein1/PureMusicAI-Music-Cleaner-App/blob/main/assets/demos/demo-1-vocal-removal.mp4" target="_blank" rel="noopener noreferrer">Watch Demo 1 — Vocal removal</a>
+https://github.com/user-attachments/assets/94656aee-237b-42aa-a33d-0bf997309dda
 
 ### Demo 2 — SFX reduction + choir preservation
 
-<a href="https://github.com/ahmedelhassanein1/PureMusicAI-Music-Cleaner-App/blob/main/assets/demos/demo-2-sfx-reduction-choir-preservation.mp4" target="_blank" rel="noopener noreferrer">Watch Demo 2 — SFX reduction + choir preservation</a>
+https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839
 
 *Source audio for this demo:* [YouTube](https://www.youtube.com/watch?v=JPWDlEAvClk&list=RDJPWDlEAvClk&start_radio=1)
 
