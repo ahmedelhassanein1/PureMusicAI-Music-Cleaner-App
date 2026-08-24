@@ -1,4 +1,6 @@
-![PureMusic AI logo](assets/logo-sm.png)**PureMusic AI - Music Cleaner**
+<img src="assets/logo.png" alt="PureMusic AI logo" width="160">
+
+# PureMusic AI - Music Cleaner
 
 Remove lead vocals and dialogue; reduce sound effects (SFX); keep choir and instrumental backing.  
 Runs locally via **WSL + Docker** — free, no account, files stay on your machine.
@@ -72,8 +74,6 @@ Screen recordings of the app in action. Click play to watch inline, or use the l
 - **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** with WSL integration enabled
 - **8 GB+ RAM** (16 GB recommended)
 - **Optional:** NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for faster separation
-
-
 
 ### Clone and start
 
@@ -254,8 +254,6 @@ Use a **30–60 second** clip first.
 
 ## Troubleshooting
 
-
-
 ### Docker and startup
 
 
@@ -264,8 +262,6 @@ Use a **30–60 second** clip first.
 | `docker compose` not found   | Start Docker Desktop; enable WSL integration               |
 | Frontend works, upload fails | Wait for backend; check `http://localhost:8000/api/health` |
 | `gpus: all` error            | Remove GPU block in `docker-compose.yml`; set `DEVICE=cpu` |
-
-
 
 
 ### During processing
@@ -277,8 +273,6 @@ Use a **30–60 second** clip first.
 | Progress stuck low on **Ensemble** | Normal — multiple passes; can take 30–60+ min                     |
 | **Job not found**                  | Don't delete `backend/jobs/` while running; jobs expire after 24h |
 | UI lost job after refresh          | Re-upload if needed; check `docker compose logs backend`          |
-
-
 
 
 ### Downloads and uploads
@@ -293,8 +287,6 @@ Use a **30–60 second** clip first.
 | CORS error       | Open `http://localhost:5173`, not `:8000` directly     |
 
 
-
-
 ### Performance
 
 
@@ -302,8 +294,6 @@ Use a **30–60 second** clip first.
 | -------------- | ----------------------------------------------------- |
 | Out of memory  | Use **Fast**; shorter clip; close other apps          |
 | Slow on laptop | Use **Fast** or **Balanced**; enable GPU if available |
-
-
 
 
 ### Debug logs
