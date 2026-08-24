@@ -29,15 +29,15 @@ Runs locally via **WSL + Docker** — free, no account, files stay on your machi
 
 ## Demos
 
-Screen recordings of the app in action. Click a link to watch the full recording.
+Screen recordings of the app in action. Links open in a new tab and play in your browser (no download required).
 
 ### Demo 1 — Vocal removal
 
-[Watch Demo 1 — Vocal removal](https://github.com/ahmedelhassanein1/PureMusicAI-Music-Cleaner-App/raw/main/assets/demos/demo-1-vocal-removal.mp4)
+<a href="https://github.com/ahmedelhassanein1/PureMusicAI-Music-Cleaner-App/blob/main/assets/demos/demo-1-vocal-removal.mp4" target="_blank" rel="noopener noreferrer">Watch Demo 1 — Vocal removal</a>
 
 ### Demo 2 — SFX reduction + choir preservation
 
-[Watch Demo 2 — SFX reduction + choir preservation](https://github.com/ahmedelhassanein1/PureMusicAI-Music-Cleaner-App/raw/main/assets/demos/demo-2-sfx-reduction-choir-preservation.mp4)
+<a href="https://github.com/ahmedelhassanein1/PureMusicAI-Music-Cleaner-App/blob/main/assets/demos/demo-2-sfx-reduction-choir-preservation.mp4" target="_blank" rel="noopener noreferrer">Watch Demo 2 — SFX reduction + choir preservation</a>
 
 *Source audio for this demo:* [YouTube](https://www.youtube.com/watch?v=JPWDlEAvClk&list=RDJPWDlEAvClk&start_radio=1)
 
