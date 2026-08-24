@@ -64,11 +64,7 @@ Screen recordings of the app in action. Click play to watch inline, or use the l
 
 ---
 
-
-
 ## Running the app
-
-
 
 ### Prerequisites
 
@@ -107,11 +103,7 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 
 ---
 
-
-
 ## Hardware requirements
-
-
 
 ### System
 
@@ -122,8 +114,6 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 | **Disk**  | 5 GB free        | 10 GB+ free (model cache in `backend/models/`) |
 | **CPU**   | 4 cores          | 8+ cores                                       |
 | **GPU**   | None (CPU works) | NVIDIA 6 GB+ VRAM (e.g. RTX 3050 Ti)           |
-
-
 
 
 ### Model choice vs your machine
@@ -153,8 +143,6 @@ Times are approximate — track length and system load matter.
 
 ---
 
-
-
 ## How it works (pipeline)
 
 ```mermaid
@@ -172,8 +160,6 @@ flowchart LR
 Each job is a folder under `backend/jobs/` with a `status.json` file tracking progress. No database — everything is on disk.
 
 ---
-
-
 
 ## Project structure
 
@@ -213,8 +199,6 @@ music-cleaner/
 
 ---
 
-
-
 ## Tech stack
 
 
@@ -233,8 +217,6 @@ music-cleaner/
 **Not used:** accounts, cloud storage, Redis, Celery, or a SQL database.
 
 ---
-
-
 
 ## Running tests
 
@@ -255,8 +237,6 @@ npm test
 
 ---
 
-
-
 ## Manual smoke test checklist
 
 Use a **30–60 second** clip first.
@@ -271,8 +251,6 @@ Use a **30–60 second** clip first.
 - [ ] `pytest` and `npm test` pass
 
 ---
-
-
 
 ## Troubleshooting
 
@@ -337,8 +315,6 @@ cat backend/jobs/<job-id>/status.json
 
 ---
 
-
-
 ## API reference
 
 
@@ -353,8 +329,6 @@ cat backend/jobs/<job-id>/status.json
 
 
 ---
-
-
 
 ## Credits
 
