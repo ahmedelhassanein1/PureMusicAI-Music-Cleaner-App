@@ -1,7 +1,4 @@
-<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 1.25rem;">
-  <img src="assets/logo-sm.png" alt="PureMusic AI logo" width="46" />
-  <span style="font-size: 1.75rem; font-weight: 700; line-height: 1; white-space: nowrap;">PureMusic AI - Music Cleaner</span>
-</div>
+![PureMusic AI logo](assets/logo-sm.png)**PureMusic AI - Music Cleaner**
 
 Remove lead vocals and dialogue; reduce sound effects (SFX); keep choir and instrumental backing.  
 Runs locally via **WSL + Docker** — free, no account, files stay on your machine.
@@ -11,11 +8,11 @@ Runs locally via **WSL + Docker** — free, no account, files stay on your machi
 ## What it does
 
 
-| Removed / reduced                          | Kept                                                        |
-| ------------------------------------------ | ----------------------------------------------------------- |
-| Lead vocals *(removed)*                    | Instrumental backing                                        |
-| Spoken dialogue *(removed)*                | Choir / group vocals *(when choir preservation is enabled)* |
-| Sound effects *(reduced, not guaranteed)*  | Musical content                                             |
+| Removed / reduced                         | Kept                                                        |
+| ----------------------------------------- | ----------------------------------------------------------- |
+| Lead vocals *(removed)*                   | Instrumental backing                                        |
+| Spoken dialogue *(removed)*               | Choir / group vocals *(when choir preservation is enabled)* |
+| Sound effects *(reduced, not guaranteed)* | Musical content                                             |
 
 
 **How it works in one sentence:** upload a song → AI separates and cleans stems → download an instrumental (MP3 or WAV).
@@ -25,6 +22,22 @@ Runs locally via **WSL + Docker** — free, no account, files stay on your machi
 **Choir:** Use **choir aggressiveness** + a **karaoke sub-model** to improve backing vocals; results still vary by track.
 
 **SFX:** PANNs ducks flagged regions, but many hits and whooshes are missed (short duration, dense mix, label gaps).
+
+---
+
+## Demos
+
+Screen recordings of the app in action. Click play to watch inline, or use the link to open the video in a new tab.
+
+### Demo 1 — Vocal removal
+
+[Open Demo 1 — Vocal removal](assets/demos/demo-1-vocal-removal.mp4)
+
+### Demo 2 — SFX reduction + choir preservation
+
+[Open Demo 2 — SFX reduction + choir preservation](assets/demos/demo-2-sfx-choir-preservation.mp4)
+
+*Source audio for this demo:* [YouTube](https://www.youtube.com/watch?v=JPWDlEAvClk&list=RDJPWDlEAvClk&start_radio=1)
 
 ---
 
@@ -51,7 +64,11 @@ Runs locally via **WSL + Docker** — free, no account, files stay on your machi
 
 ---
 
+
+
 ## Running the app
+
+
 
 ### Prerequisites
 
@@ -59,6 +76,8 @@ Runs locally via **WSL + Docker** — free, no account, files stay on your machi
 - **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** with WSL integration enabled
 - **8 GB+ RAM** (16 GB recommended)
 - **Optional:** NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for faster separation
+
+
 
 ### Clone and start
 
@@ -88,7 +107,11 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 
 ---
 
+
+
 ## Hardware requirements
+
+
 
 ### System
 
@@ -99,6 +122,8 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 | **Disk**  | 5 GB free        | 10 GB+ free (model cache in `backend/models/`) |
 | **CPU**   | 4 cores          | 8+ cores                                       |
 | **GPU**   | None (CPU works) | NVIDIA 6 GB+ VRAM (e.g. RTX 3050 Ti)           |
+
+
 
 
 ### Model choice vs your machine
@@ -128,6 +153,8 @@ Times are approximate — track length and system load matter.
 
 ---
 
+
+
 ## How it works (pipeline)
 
 ```mermaid
@@ -145,6 +172,8 @@ flowchart LR
 Each job is a folder under `backend/jobs/` with a `status.json` file tracking progress. No database — everything is on disk.
 
 ---
+
+
 
 ## Project structure
 
@@ -184,6 +213,8 @@ music-cleaner/
 
 ---
 
+
+
 ## Tech stack
 
 
@@ -202,6 +233,8 @@ music-cleaner/
 **Not used:** accounts, cloud storage, Redis, Celery, or a SQL database.
 
 ---
+
+
 
 ## Running tests
 
@@ -222,6 +255,8 @@ npm test
 
 ---
 
+
+
 ## Manual smoke test checklist
 
 Use a **30–60 second** clip first.
@@ -237,7 +272,11 @@ Use a **30–60 second** clip first.
 
 ---
 
+
+
 ## Troubleshooting
+
+
 
 ### Docker and startup
 
@@ -249,6 +288,8 @@ Use a **30–60 second** clip first.
 | `gpus: all` error            | Remove GPU block in `docker-compose.yml`; set `DEVICE=cpu` |
 
 
+
+
 ### During processing
 
 
@@ -258,6 +299,8 @@ Use a **30–60 second** clip first.
 | Progress stuck low on **Ensemble** | Normal — multiple passes; can take 30–60+ min                     |
 | **Job not found**                  | Don't delete `backend/jobs/` while running; jobs expire after 24h |
 | UI lost job after refresh          | Re-upload if needed; check `docker compose logs backend`          |
+
+
 
 
 ### Downloads and uploads
@@ -272,6 +315,8 @@ Use a **30–60 second** clip first.
 | CORS error       | Open `http://localhost:5173`, not `:8000` directly     |
 
 
+
+
 ### Performance
 
 
@@ -279,6 +324,8 @@ Use a **30–60 second** clip first.
 | -------------- | ----------------------------------------------------- |
 | Out of memory  | Use **Fast**; shorter clip; close other apps          |
 | Slow on laptop | Use **Fast** or **Balanced**; enable GPU if available |
+
+
 
 
 ### Debug logs
@@ -290,20 +337,24 @@ cat backend/jobs/<job-id>/status.json
 
 ---
 
+
+
 ## API reference
 
 
-| Method | Endpoint                  | Description                                                      |
-| ------ | ------------------------- | ---------------------------------------------------------------- |
-| `GET`  | `/api/health`             | Health check                                                     |
-| `GET`  | `/api/models`             | Curated presets + karaoke models                                 |
-| `GET`  | `/api/models?full=true`   | Full audio-separator catalog                                     |
-| `POST` | `/api/upload`             | Upload audio → `{ job_id }`                                      |
-| `GET`  | `/api/jobs/{id}`          | Job status and progress                                          |
-| `GET`  | `/api/jobs/{id}/download` | Download result (default MP3; `?format=wav`; `?bitrate=192|320`) |
+| Method | Endpoint                  | Description                                                |
+| ------ | ------------------------- | ---------------------------------------------------------- |
+| `GET`  | `/api/health`             | Health check                                               |
+| `GET`  | `/api/models`             | Curated presets + karaoke models                           |
+| `GET`  | `/api/models?full=true`   | Full audio-separator catalog                               |
+| `POST` | `/api/upload`             | Upload audio → `{ job_id }`                                |
+| `GET`  | `/api/jobs/{id}`          | Job status and progress                                    |
+| `GET`  | `/api/jobs/{id}/download` | Download result (default MP3; `?format=wav`; `?bitrate=192 |
 
 
 ---
+
+
 
 ## Credits
 
