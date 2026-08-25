@@ -121,9 +121,9 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 
 | Preset                      | GPU helpful?         | Rough time (4-min song)          |
 | --------------------------- | -------------------- | -------------------------------- |
-| **Fast**                    | Optional             | 3–8 min (CPU) · 20–60 s (GPU)    |
-| **Balanced**                | Optional             | 2–6 min (CPU) · 30–90 s (GPU)    |
-| **High Quality** (Roformer) | Strongly recommended | 20–40 min (CPU) · 5–15 min (GPU) |
+| **Fast**                    | Optional             | 5-10 min (CPU) · 2-3 min (GPU)    |
+| **Balanced**                | Optional             | 10-15 min (CPU) · 4-6 min (GPU)    |
+| **High Quality** (Roformer) | Strongly recommended | 20–40 min (CPU) · 10-15 min (GPU) |
 | **Ensemble**                | Recommended          | 30–90+ min (GPU)                 |
 
 
