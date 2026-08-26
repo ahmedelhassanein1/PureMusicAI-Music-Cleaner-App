@@ -200,7 +200,8 @@ async def upload(
                         for ch in Path(clip.filename or f"ref_{index}").stem
                     ).strip()[:80]
                     or f"ref_{index}"
-                )                ref_path = refs_dir / f"{index:02d}_{safe_stem}{ref_suffix}"
+                )
+                ref_path = refs_dir / f"{index:02d}_{safe_stem}{ref_suffix}"
                 await _save_upload_limited(clip, ref_path, settings.max_upload_bytes)
                 reference_paths.append(ref_path)
         except _UploadTooLarge as exc:
