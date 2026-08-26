@@ -10,6 +10,9 @@ Phase 4 polish (tasks 4.1–4.2):
   - Peak normalization to -1 dBFS before write
 
 Phase 4.3 — MP3 export via ffmpeg (on-demand at download; WAV remains the pipeline master).
+
+Phase 2b.4 — optional custom reference matches (MatchSegment) are converted to SfxSegment
+and ducked with the same crossfade path as generic PANNs SFX.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from app.pipeline.custom_sfx import MatchSegment
 from app.pipeline.sfx import SfxSegment
 
 logger = logging.getLogger(__name__)
@@ -46,6 +50,8 @@ class RemixPlan:
     choir_gain: float = 0.0
     sfx_segments: tuple[SfxSegment, ...] = ()
     sfx_strength: float = 0.0
+    # Phase 2b.4 — matches from custom_sfx.match_references_in_mix (same ducking path).
+    custom_sfx_segments: tuple[MatchSegment, ...] = ()
 
 
 def finalize_instrumental(plan: RemixPlan) -> Path:
@@ -55,7 +61,7 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
     Order of operations:
       1. Start from the instrumental bed
       2. Optionally add a choir/backing stem at ``choir_gain``
-      3. Optionally attenuate detected SFX regions (with boundary crossfades)
+      3. Optionally attenuate SFX regions (generic + custom) with boundary crossfades
       4. Normalize peak to ``TARGET_PEAK_DBFS`` and write the output file
     """
     choir_gain = float(np.clip(plan.choir_gain, 0.0, 2.0))
@@ -65,7 +71,8 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
         and plan.choir_path is not None
         and plan.choir_path.exists()
     )
-    has_sfx = bool(plan.sfx_segments) and sfx_strength > 0.0
+    sfx_segments = _combined_sfx_segments(plan)
+    has_sfx = bool(sfx_segments) and sfx_strength > 0.0
 
     audio, sample_rate = _load_audio(plan.instrumental_path)
 
@@ -81,14 +88,15 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
         audio = _apply_segment_crossfade(
             audio,
             sample_rate,
-            list(plan.sfx_segments),
+            sfx_segments,
             strength=sfx_strength,
             fade_ms=CROSSFADE_MS,
             padding_sec=SFX_PADDING_SEC,
         )
         logger.info(
-            "Applied SFX crossfade attenuation (%d segment(s))",
-            len(plan.sfx_segments),
+            "Applied SFX crossfade attenuation (%d segment(s); %d custom)",
+            len(sfx_segments),
+            len(plan.custom_sfx_segments),
         )
 
     audio = _normalize_peak_dbfs(audio, target_db=TARGET_PEAK_DBFS)
@@ -99,6 +107,21 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
         TARGET_PEAK_DBFS,
     )
     return plan.output_path
+
+
+def _combined_sfx_segments(plan: RemixPlan) -> list[SfxSegment]:
+    """Merge generic PANNs segments + custom reference matches into one list."""
+    combined = list(plan.sfx_segments)
+    for match in plan.custom_sfx_segments:
+        combined.append(
+            SfxSegment(
+                start=match.start,
+                end=match.end,
+                label=match.label,
+                score=match.score,
+            )
+        )
+    return combined
 
 
 def export_mp3(
