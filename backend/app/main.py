@@ -4,7 +4,7 @@ FastAPI application — upload, job status, download.
 Pipeline per job:
   1. UVR instrumental separation → instrumental_raw.wav (standard bed)
   2. Optional choir preservation (karaoke stem + heuristics) when enabled
-  3. SFX detection
+  3. SFX detection (generic AudioSet) + optional custom reference matching
   4. Remix (choir overlay + SFX) → final downloadable WAV (MP3 on download)
 """
 
@@ -14,6 +14,7 @@ import logging
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +42,7 @@ from app.pipeline.model_registry import (
 )
 from app.pipeline.separator import canonicalize_instrumental, separate_instrumental
 from app.pipeline.sfx import detect_sfx_segments
+from app.pipeline.custom_sfx import embed_reference_clips, match_references_in_mix
 from app.settings import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -67,6 +69,7 @@ ALLOWED_UPLOAD_MIME_TYPES = frozenset(
     }
 )
 _UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1 MB
+MAX_REFERENCE_CLIPS = 10
 
 
 @asynccontextmanager
@@ -123,12 +126,14 @@ async def upload(
     karaoke_model_id: str = Form(default=DEFAULT_KARAOKE_MODEL_ID),
     choir_aggressiveness: float = Form(default=0.0),
     sfx_strength: float = Form(default=1.0),
+    reference_clips: Annotated[list[UploadFile], File()] = [],
 ) -> dict:
     """
     Accept an audio upload and queue separation + optional choir + SFX cleanup.
 
     choir_aggressiveness: 0.0–1.0 — blends extracted choir back onto the bed.
     sfx_strength: 0.0–1.0 (1.0 = full attenuation in detected SFX regions).
+    reference_clips: optional short SFX samples for custom matching (Phase 2b).
     """
     preset = get_preset(model_id)
     if preset is None:
@@ -151,6 +156,16 @@ async def upload(
             detail=f"Unknown or invalid karaoke_model_id: {karaoke_model_id}",
         )
 
+    # Drop empty placeholders some browsers send when the multi-file input is unused.
+    ref_uploads = [clip for clip in reference_clips if clip.filename]
+    if len(ref_uploads) > MAX_REFERENCE_CLIPS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many reference clips (max {MAX_REFERENCE_CLIPS}).",
+        )
+    for clip in ref_uploads:
+        _validate_upload_file(clip)
+
     status = job_store.create_job(model_id=model_id, original_filename=file.filename)
     job_id = status["id"]
     job_store.update_job(
@@ -158,6 +173,7 @@ async def upload(
         sfx_strength=sfx_strength,
         karaoke_model_id=karaoke_model_id,
         choir_aggressiveness=choir_aggressiveness,
+        custom_sfx_clip_count=len(ref_uploads),
     )
 
     directory = job_store.job_dir(job_id)
@@ -170,6 +186,30 @@ async def upload(
 
     logger.info("Saved upload for job %s (%d bytes, %s)", job_id, bytes_written, suffix)
 
+    reference_paths: list[Path] = []
+    if ref_uploads:
+        refs_dir = directory / "references"
+        refs_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            for index, clip in enumerate(ref_uploads):
+                ref_suffix = Path(clip.filename or "").suffix.lower() or ".wav"
+                # Keep original stem so MatchSegment labels stay readable.
+                safe_stem = (
+                    "".join(
+                        ch if ch.isalnum() or ch in "-_ " else "_"
+                        for ch in Path(clip.filename or f"ref_{index}").stem
+                    ).strip()[:80]
+                    or f"ref_{index}"
+                )                ref_path = refs_dir / f"{index:02d}_{safe_stem}{ref_suffix}"
+                await _save_upload_limited(clip, ref_path, settings.max_upload_bytes)
+                reference_paths.append(ref_path)
+        except _UploadTooLarge as exc:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except HTTPException:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+
     background_tasks.add_task(
         _run_pipeline,
         job_id,
@@ -178,6 +218,7 @@ async def upload(
         karaoke_model_id,
         choir_aggressiveness,
         sfx_strength,
+        reference_paths,
     )
     return {"job_id": job_id, "status": status["status"]}
 
@@ -344,6 +385,7 @@ def _run_pipeline(
     karaoke_model_id: str,
     choir_aggressiveness: float,
     sfx_strength: float,
+    reference_paths: list[Path] | None = None,
 ) -> None:
     """
     Background worker: UVR separation → optional choir → SFX scan → remix finalize.
@@ -351,6 +393,7 @@ def _run_pipeline(
     Download defaults to instrumental_raw.wav. instrumental.wav is used when SFX
     regions were detected and attenuated during the remix step.
     """
+    reference_paths = list(reference_paths or [])
     try:
         standard_preset, karaoke_preset, choir_aggressiveness, choir_enabled = (
             _resolve_pipeline_presets(model_id, karaoke_model_id, choir_aggressiveness)
@@ -423,8 +466,28 @@ def _run_pipeline(
         if fired_labels:
             logger.info("Job %s SFX classes detected: %s", job_id, fired_labels)
 
+        # --- Step 3b: optional custom reference matching (Phase 2b) ---
+        custom_matches = []
+        if reference_paths:
+            job_store.set_stage(job_id, "matching_custom_sfx", progress=82)
+            refs = embed_reference_clips(reference_paths)
+            custom_matches = match_references_in_mix(work_path, refs)
+            job_store.update_job(
+                job_id,
+                custom_sfx_segment_count=len(custom_matches),
+                custom_sfx_labels=[m.label for m in custom_matches],
+            )
+            logger.info(
+                "Job %s: custom SFX %d match(es) from %d reference(s)",
+                job_id,
+                len(custom_matches),
+                len(refs),
+            )
+
         # --- Step 4: Remix stems → final WAV ---
-        apply_sfx = bool(sfx_segments) and sfx_strength > 0
+        apply_sfx = (
+            (bool(sfx_segments) or bool(custom_matches)) and sfx_strength > 0
+        )
         download_name = "instrumental.wav" if apply_sfx else "instrumental_raw.wav"
         final_path = directory / download_name
 
@@ -437,6 +500,7 @@ def _run_pipeline(
                 choir_gain=choir_aggressiveness if choir_enabled else 0.0,
                 sfx_segments=tuple(sfx_segments),
                 sfx_strength=sfx_strength if apply_sfx else 0.0,
+                custom_sfx_segments=tuple(custom_matches),
             )
         )
 

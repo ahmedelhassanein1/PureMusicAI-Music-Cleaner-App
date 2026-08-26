@@ -42,12 +42,14 @@ export async function uploadAudio(
     sfxStrength?: number;
     karaokeModelId?: string;
     choirAggressiveness?: number;
+    referenceClips?: File[];
   } = {},
 ): Promise<{ job_id: string }> {
   const {
     sfxStrength = 1.0,
     karaokeModelId = "karaoke_mdx_kara2",
     choirAggressiveness = 0,
+    referenceClips = [],
   } = options;
 
   const form = new FormData();
@@ -59,6 +61,9 @@ export async function uploadAudio(
     String(Math.max(0, Math.min(1, choirAggressiveness))),
   );
   form.append("sfx_strength", String(Math.max(0, Math.min(1, sfxStrength))));
+  for (const clip of referenceClips) {
+    form.append("reference_clips", clip);
+  }
 
   const res = await fetch(`${API_BASE}/upload`, {
     method: "POST",
