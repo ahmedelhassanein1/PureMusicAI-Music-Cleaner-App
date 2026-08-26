@@ -3,6 +3,7 @@ Phase 2b — custom SFX via PANNs embeddings.
 
 2b.2: reference WAV → 2048-d L2-normalized embedding
 2b.3: sliding-window cosine match against a mix
+2b.4: matched regions are attenuated in remix.py (same crossfade as generic SFX)
 """
 
 from __future__ import annotations
@@ -79,7 +80,6 @@ def embed_reference_clip(
         embedding=embedding,
         duration_sec=duration_sec,
     )
-
 
 def embed_reference_clips(
     paths: list[Path] | list[str],
