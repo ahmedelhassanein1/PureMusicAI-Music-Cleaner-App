@@ -11,8 +11,8 @@ Phase 4 polish (tasks 4.1–4.2):
 
 Phase 4.3 — MP3 export via ffmpeg (on-demand at download; WAV remains the pipeline master).
 
-Phase 2b.4 — optional custom reference matches (MatchSegment) are converted to SfxSegment
-and ducked with the same crossfade path as generic PANNs SFX.
+Phase 2b.4 — custom reference matches are ducked separately with a softer
+gain (time-domain attenuation can't isolate SFX from music in the same window).
 """
 
 from __future__ import annotations
@@ -35,6 +35,10 @@ TARGET_PEAK_DBFS = -1.0
 CROSSFADE_MS = 20.0
 SFX_PADDING_SEC = 0.03
 
+# Custom refs sit on top of music. Full mute (strength=1) would silence the bed
+# too — scale the slider so even 100% leaves ~45% residual level in that window.
+CUSTOM_SFX_STRENGTH_SCALE = 0.55
+
 # Phase 4.3 — MP3 download defaults.
 DEFAULT_MP3_BITRATE_KBPS = 192
 ALLOWED_MP3_BITRATES = frozenset({192, 320})
@@ -50,7 +54,7 @@ class RemixPlan:
     choir_gain: float = 0.0
     sfx_segments: tuple[SfxSegment, ...] = ()
     sfx_strength: float = 0.0
-    # Phase 2b.4 — matches from custom_sfx.match_references_in_mix (same ducking path).
+    # Phase 2b.4 — matches from custom_sfx.match_references_in_mix.
     custom_sfx_segments: tuple[MatchSegment, ...] = ()
 
 
@@ -61,8 +65,9 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
     Order of operations:
       1. Start from the instrumental bed
       2. Optionally add a choir/backing stem at ``choir_gain``
-      3. Optionally attenuate SFX regions (generic + custom) with boundary crossfades
-      4. Normalize peak to ``TARGET_PEAK_DBFS`` and write the output file
+      3. Attenuate generic SFX regions (full strength)
+      4. Soft-duck custom reference matches (scaled strength — keeps music)
+      5. Normalize peak to ``TARGET_PEAK_DBFS`` and write the output file
     """
     choir_gain = float(np.clip(plan.choir_gain, 0.0, 2.0))
     sfx_strength = float(np.clip(plan.sfx_strength, 0.0, 1.0))
@@ -71,8 +76,8 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
         and plan.choir_path is not None
         and plan.choir_path.exists()
     )
-    sfx_segments = _combined_sfx_segments(plan)
-    has_sfx = bool(sfx_segments) and sfx_strength > 0.0
+    has_generic_sfx = bool(plan.sfx_segments) and sfx_strength > 0.0
+    has_custom_sfx = bool(plan.custom_sfx_segments) and sfx_strength > 0.0
 
     audio, sample_rate = _load_audio(plan.instrumental_path)
 
@@ -84,19 +89,35 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
         )
         logger.info("Mixed choir overlay onto instrumental bed")
 
-    if has_sfx:
+    if has_generic_sfx:
         audio = _apply_segment_crossfade(
             audio,
             sample_rate,
-            sfx_segments,
+            list(plan.sfx_segments),
             strength=sfx_strength,
             fade_ms=CROSSFADE_MS,
             padding_sec=SFX_PADDING_SEC,
         )
         logger.info(
-            "Applied SFX crossfade attenuation (%d segment(s); %d custom)",
-            len(sfx_segments),
-            len(plan.custom_sfx_segments),
+            "Applied generic SFX crossfade attenuation (%d segment(s))",
+            len(plan.sfx_segments),
+        )
+
+    if has_custom_sfx:
+        custom_strength = sfx_strength * CUSTOM_SFX_STRENGTH_SCALE
+        custom_segments = _custom_matches_as_sfx_segments(plan.custom_sfx_segments)
+        audio = _apply_segment_crossfade(
+            audio,
+            sample_rate,
+            custom_segments,
+            strength=custom_strength,
+            fade_ms=CROSSFADE_MS,
+            padding_sec=SFX_PADDING_SEC,
+        )
+        logger.info(
+            "Applied soft custom SFX ducking (%d segment(s), strength=%.2f)",
+            len(custom_segments),
+            custom_strength,
         )
 
     audio = _normalize_peak_dbfs(audio, target_db=TARGET_PEAK_DBFS)
@@ -109,19 +130,19 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
     return plan.output_path
 
 
-def _combined_sfx_segments(plan: RemixPlan) -> list[SfxSegment]:
-    """Merge generic PANNs segments + custom reference matches into one list."""
-    combined = list(plan.sfx_segments)
-    for match in plan.custom_sfx_segments:
-        combined.append(
-            SfxSegment(
-                start=match.start,
-                end=match.end,
-                label=match.label,
-                score=match.score,
-            )
+def _custom_matches_as_sfx_segments(
+    matches: tuple[MatchSegment, ...],
+) -> list[SfxSegment]:
+    """Convert MatchSegment → SfxSegment for the shared crossfade helper."""
+    return [
+        SfxSegment(
+            start=match.start,
+            end=match.end,
+            label=match.label,
+            score=match.score,
         )
-    return combined
+        for match in matches
+    ]
 
 
 def export_mp3(
