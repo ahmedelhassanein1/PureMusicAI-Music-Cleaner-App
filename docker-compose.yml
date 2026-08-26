@@ -4,6 +4,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./backend/app:/app/app
       - ./backend/jobs:/app/jobs
       - ./backend/models:/app/models
     gpus: all
