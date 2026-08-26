@@ -17,6 +17,9 @@ dist/
 backend/jobs/
 backend/models/
 
+# Phase 2b — local-only test audio + notes (never commit; includes README.md)
+test/fixtures/
+
 # OS / IDE
 .DS_Store
 .env
