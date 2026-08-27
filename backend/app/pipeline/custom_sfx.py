@@ -4,6 +4,7 @@ Phase 2b — custom SFX via PANNs embeddings.
 2b.2: reference WAV → 2048-d L2-normalized embedding
 2b.3: sliding-window cosine match against a mix
 2b.4: matched regions are attenuated in remix.py (same crossfade as generic SFX)
+2b-S.1: MatchSegment carries ref_path so spectral masking can load the winning clip
 """
 
 from __future__ import annotations
@@ -48,6 +49,8 @@ class MatchSegment:
     end: float
     label: str
     score: float
+    # Disk path of the winning reference — needed later for spectral masking (2b-S.2+).
+    ref_path: Path | None = None
 
 
 def embed_reference_clip(
@@ -198,6 +201,7 @@ def _match_one_reference(
                     end=float(mix.shape[0]) / PANNS_SAMPLE_RATE,
                     label=ref.name,
                     score=score,
+                    ref_path=ref.path,
                 )
             ]
         return []
@@ -220,13 +224,14 @@ def _match_one_reference(
                 end=start + win_sec,
                 label=ref.name,
                 score=float(score),
+                ref_path=ref.path,
             )
         )
     return raw
 
 
 def _merge_match_segments(segments: list[MatchSegment]) -> list[MatchSegment]:
-    """Merge overlapping/adjacent hits; keep best score + its label."""
+    """Merge overlapping/adjacent hits; keep best score, label, and ref_path."""
     if not segments:
         return []
 
@@ -237,11 +242,13 @@ def _merge_match_segments(segments: list[MatchSegment]) -> list[MatchSegment]:
         prev = merged[-1]
         # Allow a small gap (~one hop) so near-hits become one span.
         if seg.start <= prev.end + 0.05:
+            use_seg = seg.score > prev.score
             merged[-1] = MatchSegment(
                 start=prev.start,
                 end=max(prev.end, seg.end),
-                label=seg.label if seg.score > prev.score else prev.label,
+                label=seg.label if use_seg else prev.label,
                 score=max(prev.score, seg.score),
+                ref_path=seg.ref_path if use_seg else prev.ref_path,
             )
         else:
             merged.append(seg)
