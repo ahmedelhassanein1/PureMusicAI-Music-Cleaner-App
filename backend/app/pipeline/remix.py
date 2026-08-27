@@ -36,8 +36,9 @@ CROSSFADE_MS = 20.0
 SFX_PADDING_SEC = 0.03
 
 # Custom refs sit on top of music. Full mute (strength=1) would silence the bed
-# too — scale the slider so even 100% leaves ~45% residual level in that window.
-CUSTOM_SFX_STRENGTH_SCALE = 0.55
+# too — scale the slider so even 100% leaves some residual level in that window.
+# Higher = stronger SFX reduction (more music dip). Lower = gentler.
+CUSTOM_SFX_STRENGTH_SCALE = 0.80
 
 # Phase 4.3 — MP3 download defaults.
 DEFAULT_MP3_BITRATE_KBPS = 192
