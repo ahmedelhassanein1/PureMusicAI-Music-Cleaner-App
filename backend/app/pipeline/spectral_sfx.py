@@ -26,7 +26,7 @@ EPS = 1e-8
 EDGE_CROSSFADE_MS = 20.0
 # Wiener ref overweight: 1.0 = classic soft mask; higher = stronger SFX cut
 # (more music dip when bins overlap). A/B knob — try 2–4, revert to 1 if harsh.
-MASK_REF_WEIGHT = 4.0
+MASK_REF_WEIGHT = 1.0
 
 
 def _stft(audio_mono: np.ndarray) -> np.ndarray:

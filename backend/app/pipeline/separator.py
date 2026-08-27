@@ -17,6 +17,7 @@ _MANAGED_STEMS = frozenset(
     {
         "instrumental_raw.wav",
         "instrumental.wav",
+        "instrumental_denoised.wav",
         "karaoke_instrumental_raw.wav",
         "choir_candidate.wav",
         "choir_preserved.wav",
