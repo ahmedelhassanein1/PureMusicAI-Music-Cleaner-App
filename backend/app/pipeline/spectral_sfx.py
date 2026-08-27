@@ -4,7 +4,7 @@ Phase 2b — ref-guided soft spectral mask (Approach B).
 STFT(mix window) + ref frequency template → Wiener-like mask → iSTFT,
 then cosine edge crossfade back into the untouched bed (2b-S.3).
 Cuts SFX-like frequency bins while leaving other bins closer to full level.
-Pure DSP (numpy/librosa); remix wiring is 2b-S.4.
+Pure DSP (numpy/librosa); called from remix.finalize_instrumental (2b-S.4).
 """
 
 from __future__ import annotations
