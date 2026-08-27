@@ -18,7 +18,7 @@ when the reference file is missing/unreadable or the spectral edit fails.
 
 from __future__ import annotations
 
-import loggingv
+import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
