@@ -1,0 +1,179 @@
+"""
+Phase 2b — ref-guided soft spectral mask (Approach B).
+
+STFT(mix window) + ref frequency template → Wiener-like mask → iSTFT.
+Cuts SFX-like frequency bins while leaving other bins closer to full level.
+Pure DSP (numpy/librosa); remix wiring is 2b-S.4.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import librosa
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+N_FFT = 2048
+HOP_LENGTH = 512
+# Long refs: keep loudest ~2 s so silence/tails don't dilute the template.
+MAX_TEMPLATE_SEC = 2.0
+MIN_TEMPLATE_SEC = 0.25
+EPS = 1e-8
+
+
+def _stft(audio_mono: np.ndarray) -> np.ndarray:
+    """Complex STFT → (freq_bins, time_frames)."""
+    return librosa.stft(
+        np.asarray(audio_mono, dtype=np.float32),
+        n_fft=N_FFT,
+        hop_length=HOP_LENGTH,
+        center=True,
+    )
+
+
+def _istft(stft_matrix: np.ndarray, *, length: int | None = None) -> np.ndarray:
+    """Inverse STFT → mono float32 waveform."""
+    audio = librosa.istft(
+        stft_matrix,
+        hop_length=HOP_LENGTH,
+        center=True,
+        length=length,
+    )
+    return np.asarray(audio, dtype=np.float32)
+
+
+def _crop_peak_energy(audio_mono: np.ndarray, sample_rate: int) -> np.ndarray:
+    """
+    Keep ≤ MAX_TEMPLATE_SEC around the loudest RMS peak.
+
+    Short clips are unchanged; long ones (e.g. 17 s) drop quiet tails.
+    """
+    audio_mono = np.asarray(audio_mono, dtype=np.float32).reshape(-1)
+    max_samples = int(MAX_TEMPLATE_SEC * sample_rate)
+    if audio_mono.size <= max_samples:
+        return audio_mono
+
+    win = max(1, int(MIN_TEMPLATE_SEC * sample_rate))
+    # Sliding RMS via squared moving average → find densest SFX region.
+    sq = audio_mono.astype(np.float64) ** 2
+    kernel = np.ones(win, dtype=np.float64) / win
+    rms = np.sqrt(np.convolve(sq, kernel, mode="same") + EPS)
+    peak = int(np.argmax(rms))
+    half = max_samples // 2
+    start = max(0, peak - half)
+    end = min(audio_mono.size, start + max_samples)
+    start = max(0, end - max_samples)
+    return audio_mono[start:end]
+
+
+def ref_template_magnitude(
+    ref_audio: np.ndarray,
+    sample_rate: int,
+) -> np.ndarray:
+    """
+    Time-averaged |STFT| of the ref → (freq_bins,) fingerprint.
+
+    Describes which frequencies the SFX occupies, not its full timeline.
+    """
+    mono = np.asarray(ref_audio, dtype=np.float32)
+    if mono.ndim > 1:
+        mono = np.mean(mono, axis=-1)
+    mono = _crop_peak_energy(mono, sample_rate)
+    if mono.size == 0:
+        raise ValueError("Reference audio is empty")
+
+    mag = np.abs(_stft(mono))
+    # Average over time so one vector describes "what this SFX sounds like".
+    return np.mean(mag, axis=1).astype(np.float32)
+
+
+def soft_mask(
+    mix_mag: np.ndarray,
+    ref_mag: np.ndarray,
+    *,
+    floor: float = 0.0,
+) -> np.ndarray:
+    """
+    Wiener-like mask in [floor, 1]; high where ref explains mix energy.
+
+    mix_mag: (freq, time); ref_mag: (freq,) or (freq, time).
+    """
+    mix_mag = np.asarray(mix_mag, dtype=np.float32)
+    ref_mag = np.asarray(ref_mag, dtype=np.float32)
+
+    if ref_mag.ndim == 1:
+        ref_b = ref_mag[:, None]
+    else:
+        ref_b = ref_mag
+
+    if ref_b.shape[0] != mix_mag.shape[0]:
+        raise ValueError(
+            f"Frequency bin mismatch: ref {ref_b.shape[0]} vs mix {mix_mag.shape[0]}"
+        )
+
+    # Broadcast / tile ref across mix time frames.
+    if ref_b.shape[1] == 1:
+        ref_b = np.broadcast_to(ref_b, mix_mag.shape)
+    elif ref_b.shape[1] != mix_mag.shape[1]:
+        reps = int(np.ceil(mix_mag.shape[1] / ref_b.shape[1]))
+        ref_b = np.tile(ref_b, (1, reps))[:, : mix_mag.shape[1]]
+
+    mask = ref_b / (ref_b + mix_mag + EPS)
+    floor = float(np.clip(floor, 0.0, 1.0))
+    return np.clip(mask, floor, 1.0).astype(np.float32)
+
+
+def apply_spectral_mask_to_segment(
+    mix: np.ndarray,
+    sample_rate: int,
+    start: float,
+    end: float,
+    ref_audio: np.ndarray,
+    strength: float,
+) -> np.ndarray:
+    """
+    Spectrally attenuate [start, end) using ref as template.
+
+    mix: mono (N,) or stereo (N, C). strength 0 = no-op, 1 = full mask.
+    Same mono-derived mask applied to every channel.
+    """
+    strength = float(np.clip(strength, 0.0, 1.0))
+    out = np.array(mix, dtype=np.float32, copy=True)
+    if out.ndim == 1:
+        out = out[:, None]
+    elif out.ndim != 2:
+        raise ValueError(f"Expected 1D or 2D mix, got shape {out.shape}")
+
+    n_samples, n_ch = out.shape
+    start_i = max(0, int(start * sample_rate))
+    end_i = min(n_samples, int(end * sample_rate))
+    if end_i <= start_i or strength <= 0.0:
+        return out.squeeze(axis=1) if mix.ndim == 1 else out
+
+    segment = out[start_i:end_i, :]
+    seg_len = segment.shape[0]
+    # One mask from mono downmix so L/R stay phase-aligned.
+    mono_seg = np.mean(segment, axis=1)
+    if mono_seg.size < N_FFT // 4:
+        logger.warning(
+            "Segment too short for stable STFT (%d samples) — leaving unchanged",
+            mono_seg.size,
+        )
+        return out.squeeze(axis=1) if mix.ndim == 1 else out
+
+    mix_mag = np.abs(_stft(mono_seg))
+    mask = soft_mask(mix_mag, ref_template_magnitude(ref_audio, sample_rate))
+    gain = (1.0 - strength * mask).astype(np.float32)
+
+    # Keep mix phase; shrink magnitudes where mask is high.
+    for ch in range(n_ch):
+        ch_stft = _stft(segment[:, ch])
+        edited = _istft(ch_stft * gain, length=seg_len)
+        if edited.shape[0] < seg_len:
+            pad = np.zeros(seg_len - edited.shape[0], dtype=np.float32)
+            edited = np.concatenate([edited, pad])
+        out[start_i:end_i, ch] = edited[:seg_len]
+
+    return out.squeeze(axis=1) if mix.ndim == 1 else out
