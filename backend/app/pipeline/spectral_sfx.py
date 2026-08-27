@@ -24,6 +24,9 @@ MIN_TEMPLATE_SEC = 0.25
 EPS = 1e-8
 # Blend edited ↔ original at segment edges so hard STFT splices don't click.
 EDGE_CROSSFADE_MS = 20.0
+# Wiener ref overweight: 1.0 = classic soft mask; higher = stronger SFX cut
+# (more music dip when bins overlap). A/B knob — try 2–4, revert to 1 if harsh.
+MASK_REF_WEIGHT = 3.0
 
 
 def _stft(audio_mono: np.ndarray) -> np.ndarray:
@@ -102,6 +105,7 @@ def soft_mask(
     Wiener-like mask in [floor, 1]; high where ref explains mix energy.
 
     mix_mag: (freq, time); ref_mag: (freq,) or (freq, time).
+    ``MASK_REF_WEIGHT`` > 1 tilts the ratio toward the ref (stronger cut).
     """
     mix_mag = np.asarray(mix_mag, dtype=np.float32)
     ref_mag = np.asarray(ref_mag, dtype=np.float32)
@@ -123,7 +127,10 @@ def soft_mask(
         reps = int(np.ceil(mix_mag.shape[1] / ref_b.shape[1]))
         ref_b = np.tile(ref_b, (1, reps))[:, : mix_mag.shape[1]]
 
-    mask = ref_b / (ref_b + mix_mag + EPS)
+    # Overweight ref so mid-overlap bins duck harder than classic Wiener.
+    weight = max(float(MASK_REF_WEIGHT), 0.0)
+    weighted_ref = weight * ref_b
+    mask = weighted_ref / (weighted_ref + mix_mag + EPS)
     floor = float(np.clip(floor, 0.0, 1.0))
     return np.clip(mask, floor, 1.0).astype(np.float32)
 
