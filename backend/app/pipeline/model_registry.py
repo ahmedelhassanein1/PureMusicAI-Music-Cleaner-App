@@ -18,7 +18,7 @@ class ModelPreset:
     description: str
     model_filename: str
     arch: str  # "vr", "mdx", "mdxc", "ensemble"
-    category: str = "starter"  # starter | karaoke | classic | ensemble
+    category: str = "starter"  # starter | karaoke | classic | ensemble | cleanup
     is_karaoke: bool = False
     extra_model_filenames: tuple[str, ...] = field(default_factory=tuple)
     ensemble_preset: str | None = None
@@ -120,6 +120,21 @@ _CLASSIC_PRESETS: list[ModelPreset] = [
     ),
 ]
 
+# --- Cleanup models (post-instrumental polish; not used as main vocal removers) ---
+_CLEANUP_PRESETS: list[ModelPreset] = [
+    ModelPreset(
+        id="denoise_lite",
+        name="Denoise Lite",
+        description=(
+            "UVR DeNoise-Lite — gentle hiss/hum cleanup on an instrumental bed. "
+            "Optional pipeline pass; not a vocal remover and not aimed at loud anime SFX."
+        ),
+        model_filename="UVR-DeNoise-Lite.pth",
+        arch="vr",
+        category="cleanup",
+    ),
+]
+
 _ENSEMBLE_PRESETS: list[ModelPreset] = [
     ModelPreset(
         id="ensemble_vocal_balanced",
@@ -154,11 +169,16 @@ _ENSEMBLE_PRESETS: list[ModelPreset] = [
 ]
 
 PRESETS: list[ModelPreset] = (
-    _STARTER_PRESETS + _KARAOKE_PRESETS + _CLASSIC_PRESETS + _ENSEMBLE_PRESETS
+    _STARTER_PRESETS
+    + _KARAOKE_PRESETS
+    + _CLASSIC_PRESETS
+    + _CLEANUP_PRESETS
+    + _ENSEMBLE_PRESETS
 )
 
 DEFAULT_KARAOKE_MODEL_ID = "karaoke_mdx_kara2"
 REFERENCE_INSTRUMENTAL_MODEL_ID = "balanced"
+DENOISE_LITE_MODEL_ID = "denoise_lite"
 
 
 def get_preset(model_id: str) -> ModelPreset | None:
@@ -169,8 +189,14 @@ def get_preset(model_id: str) -> ModelPreset | None:
 
 
 def list_presets() -> list[dict[str, str | bool]]:
-    """Curated presets for the default model picker (tasks 3.1 + 3.2)."""
-    return [_preset_to_dict(p) for p in PRESETS]
+    """Curated presets for the default model picker (tasks 3.1 + 3.2).
+
+    Cleanup models (e.g. denoise) are omitted — they are optional post-passes,
+    not main vocal removers.
+    """
+    return [
+        _preset_to_dict(p) for p in PRESETS if p.category != "cleanup"
+    ]
 
 
 def list_karaoke_presets() -> list[dict[str, str | bool]]:
