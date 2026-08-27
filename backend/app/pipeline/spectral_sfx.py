@@ -1,7 +1,8 @@
 """
 Phase 2b — ref-guided soft spectral mask (Approach B).
 
-STFT(mix window) + ref frequency template → Wiener-like mask → iSTFT.
+STFT(mix window) + ref frequency template → Wiener-like mask → iSTFT,
+then cosine edge crossfade back into the untouched bed (2b-S.3).
 Cuts SFX-like frequency bins while leaving other bins closer to full level.
 Pure DSP (numpy/librosa); remix wiring is 2b-S.4.
 """
@@ -21,6 +22,8 @@ HOP_LENGTH = 512
 MAX_TEMPLATE_SEC = 2.0
 MIN_TEMPLATE_SEC = 0.25
 EPS = 1e-8
+# Blend edited ↔ original at segment edges so hard STFT splices don't click.
+EDGE_CROSSFADE_MS = 20.0
 
 
 def _stft(audio_mono: np.ndarray) -> np.ndarray:
@@ -125,6 +128,56 @@ def soft_mask(
     return np.clip(mask, floor, 1.0).astype(np.float32)
 
 
+def _crossfade_curve(length: int) -> np.ndarray:
+    """Equal-power fade 0 → 1 over ``length`` samples (same curve as remix 4.1)."""
+    if length <= 0:
+        return np.array([], dtype=np.float32)
+    t = np.linspace(0.0, 1.0, length, dtype=np.float32)
+    return np.sin(t * np.pi / 2.0) ** 2
+
+
+def _blend_edited_edges(
+    original: np.ndarray,
+    edited: np.ndarray,
+    sample_rate: int,
+    fade_ms: float = EDGE_CROSSFADE_MS,
+) -> np.ndarray:
+    """
+    Crossfade edited samples into the original bed at both edges (2b-S.3).
+
+    original / edited: (N,) or (N, C). Weight w: 0 = keep bed, 1 = full edit.
+    Short windows shrink the fade so in/out ramps never overlap past the midpoint.
+    """
+    original = np.asarray(original, dtype=np.float32)
+    edited = np.asarray(edited, dtype=np.float32)
+    if original.shape != edited.shape:
+        raise ValueError(
+            f"Shape mismatch for edge blend: {original.shape} vs {edited.shape}"
+        )
+
+    squeezed = False
+    if original.ndim == 1:
+        original = original[:, None]
+        edited = edited[:, None]
+        squeezed = True
+    elif original.ndim != 2:
+        raise ValueError(f"Expected 1D or 2D audio, got shape {original.shape}")
+
+    n = original.shape[0]
+    fade = min(max(1, int(sample_rate * fade_ms / 1000.0)), max(1, n // 2))
+    weight = np.ones(n, dtype=np.float32)
+
+    fade_in = _crossfade_curve(fade)
+    weight[:fade] = fade_in
+    weight[n - fade :] = fade_in[::-1]
+
+    # Broadcast weight over channels: out = (1-w)*original + w*edited
+    w = weight[:, None]
+    blended = (1.0 - w) * original + w * edited
+    blended = blended.astype(np.float32)
+    return blended.squeeze(axis=1) if squeezed else blended
+
+
 def apply_spectral_mask_to_segment(
     mix: np.ndarray,
     sample_rate: int,
@@ -137,7 +190,7 @@ def apply_spectral_mask_to_segment(
     Spectrally attenuate [start, end) using ref as template.
 
     mix: mono (N,) or stereo (N, C). strength 0 = no-op, 1 = full mask.
-    Same mono-derived mask applied to every channel.
+    Same mono-derived mask applied to every channel; edges crossfaded into bed.
     """
     strength = float(np.clip(strength, 0.0, 1.0))
     out = np.array(mix, dtype=np.float32, copy=True)
@@ -168,12 +221,16 @@ def apply_spectral_mask_to_segment(
     gain = (1.0 - strength * mask).astype(np.float32)
 
     # Keep mix phase; shrink magnitudes where mask is high.
+    edited = np.empty_like(segment)
     for ch in range(n_ch):
         ch_stft = _stft(segment[:, ch])
-        edited = _istft(ch_stft * gain, length=seg_len)
-        if edited.shape[0] < seg_len:
-            pad = np.zeros(seg_len - edited.shape[0], dtype=np.float32)
-            edited = np.concatenate([edited, pad])
-        out[start_i:end_i, ch] = edited[:seg_len]
+        ch_wave = _istft(ch_stft * gain, length=seg_len)
+        if ch_wave.shape[0] < seg_len:
+            pad = np.zeros(seg_len - ch_wave.shape[0], dtype=np.float32)
+            ch_wave = np.concatenate([ch_wave, pad])
+        edited[:, ch] = ch_wave[:seg_len]
+
+    # Soft splice: full edit in the middle, original bed at the edges.
+    out[start_i:end_i, :] = _blend_edited_edges(segment, edited, sample_rate)
 
     return out.squeeze(axis=1) if mix.ndim == 1 else out
