@@ -87,9 +87,10 @@ describe("uploadAudio", () => {
     expect(body.get("sfx_strength")).toBe("0.5");
     expect(body.get("choir_aggressiveness")).toBe("1");
     expect(body.get("enable_denoise")).toBe("false");
+    expect(body.get("denoise_model_id")).toBe("");
   });
 
-  it("sends enable_denoise=true when requested", async () => {
+  it("sends denoise_model_id for standard DeNoise", async () => {
     const file = new File(["audio"], "track.mp3", { type: "audio/mpeg" });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -97,10 +98,26 @@ describe("uploadAudio", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    await uploadAudio(file, "balanced", { denoiseModelId: "denoise" });
+
+    const body = fetchMock.mock.calls[0][1].body as FormData;
+    expect(body.get("enable_denoise")).toBe("true");
+    expect(body.get("denoise_model_id")).toBe("denoise");
+  });
+
+  it("maps legacy enableDenoise=true to denoise_lite", async () => {
+    const file = new File(["audio"], "track.mp3", { type: "audio/mpeg" });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ job_id: "job-denoise-lite" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
     await uploadAudio(file, "balanced", { enableDenoise: true });
 
     const body = fetchMock.mock.calls[0][1].body as FormData;
     expect(body.get("enable_denoise")).toBe("true");
+    expect(body.get("denoise_model_id")).toBe("denoise_lite");
   });
 
   it("throws with server detail on failure", async () => {

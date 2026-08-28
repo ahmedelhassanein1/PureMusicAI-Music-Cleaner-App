@@ -11,6 +11,7 @@ from app.pipeline.model_registry import (
     DENOISE_LITE_MODEL_ID,
     ModelPreset,
     get_preset,
+    is_denoise_preset,
     is_ensemble_preset,
 )
 from app.settings import settings
@@ -62,17 +63,21 @@ def denoise_instrumental(
     output_dir: Path,
     progress_callback: Callable[[int, str], None] | None = None,
     *,
+    model_id: str = DENOISE_LITE_MODEL_ID,
     dest_name: str = "instrumental_denoised.wav",
 ) -> Path:
     """
-    Run UVR DeNoise-Lite on an instrumental bed and canonicalize the clean stem.
+    Run a UVR denoise cleanup model on an instrumental bed.
 
-    First call may download ``UVR-DeNoise-Lite.pth`` into the models directory.
+    ``model_id`` should be a cleanup preset (``denoise_lite`` or ``denoise``).
+    First call for a given model may download its ``.pth`` into the models dir.
     Returns the stable ``dest_name`` path (default ``instrumental_denoised.wav``).
     """
-    preset = get_preset(DENOISE_LITE_MODEL_ID)
+    if not is_denoise_preset(model_id):
+        raise ValueError(f"Not a denoise cleanup preset: {model_id}")
+    preset = get_preset(model_id)
     if preset is None:
-        raise ValueError(f"Missing cleanup preset: {DENOISE_LITE_MODEL_ID}")
+        raise ValueError(f"Missing cleanup preset: {model_id}")
 
     output_files = _separate(
         input_path=input_path,
@@ -82,7 +87,12 @@ def denoise_instrumental(
     )
     clean = _pick_denoise_clean(output_files, output_dir)
     canonical = canonicalize_instrumental(clean, output_dir, dest_name=dest_name)
-    logger.info("Denoise Lite complete: %s (from %s)", canonical.name, clean.name)
+    logger.info(
+        "Denoise complete (%s): %s (from %s)",
+        preset.id,
+        canonical.name,
+        clean.name,
+    )
     return canonical
 
 

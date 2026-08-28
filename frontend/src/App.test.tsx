@@ -97,7 +97,7 @@ describe("App", () => {
         karaokeModelId: "karaoke_mdx_kara2",
         choirAggressiveness: 0,
         sfxStrength: 1,
-        enableDenoise: false,
+        denoiseModelId: "",
       }),
     );
 

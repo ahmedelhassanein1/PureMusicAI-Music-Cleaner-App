@@ -510,28 +510,8 @@ body {
   cursor: not-allowed;
 }
 
-.denoise-toggle {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.65rem;
+.denoise-control {
   margin-top: 1rem;
-  cursor: pointer;
-}
-
-.denoise-toggle input {
-  margin-top: 0.2rem;
-  flex-shrink: 0;
-}
-
-.denoise-toggle-title {
-  display: block;
-  font-weight: 600;
-  font-size: 0.92rem;
-}
-
-.denoise-toggle-hint {
-  display: block;
-  margin-top: 0.2rem;
 }
 
 .progress-wrap {
