@@ -22,6 +22,7 @@ export type JobStatus = {
   model_id: string;
   karaoke_model_id?: string;
   choir_aggressiveness?: number;
+  enable_denoise?: boolean;
   original_filename: string;
   output_filename: string | null;
   error: string | null;
@@ -42,6 +43,7 @@ export async function uploadAudio(
     sfxStrength?: number;
     karaokeModelId?: string;
     choirAggressiveness?: number;
+    enableDenoise?: boolean;
     referenceClips?: File[];
   } = {},
 ): Promise<{ job_id: string }> {
@@ -49,6 +51,7 @@ export async function uploadAudio(
     sfxStrength = 1.0,
     karaokeModelId = "karaoke_mdx_kara2",
     choirAggressiveness = 0,
+    enableDenoise = false,
     referenceClips = [],
   } = options;
 
@@ -61,6 +64,7 @@ export async function uploadAudio(
     String(Math.max(0, Math.min(1, choirAggressiveness))),
   );
   form.append("sfx_strength", String(Math.max(0, Math.min(1, sfxStrength))));
+  form.append("enable_denoise", enableDenoise ? "true" : "false");
   for (const clip of referenceClips) {
     form.append("reference_clips", clip);
   }

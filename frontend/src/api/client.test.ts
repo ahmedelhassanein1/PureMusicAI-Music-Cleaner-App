@@ -86,6 +86,21 @@ describe("uploadAudio", () => {
     expect(body.get("karaoke_model_id")).toBe("karaoke_mdx_kara2");
     expect(body.get("sfx_strength")).toBe("0.5");
     expect(body.get("choir_aggressiveness")).toBe("1");
+    expect(body.get("enable_denoise")).toBe("false");
+  });
+
+  it("sends enable_denoise=true when requested", async () => {
+    const file = new File(["audio"], "track.mp3", { type: "audio/mpeg" });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ job_id: "job-denoise" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await uploadAudio(file, "balanced", { enableDenoise: true });
+
+    const body = fetchMock.mock.calls[0][1].body as FormData;
+    expect(body.get("enable_denoise")).toBe("true");
   });
 
   it("throws with server detail on failure", async () => {
