@@ -1,4 +1,4 @@
-"""Thin wrapper around audio-separator for instrumental and vocal stems."""
+"""Thin wrapper around audio-separator for instrumental, vocal, and cleanup stems."""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from app.pipeline.model_registry import ModelPreset, is_ensemble_preset
+from app.pipeline.model_registry import (
+    DENOISE_LITE_MODEL_ID,
+    ModelPreset,
+    get_preset,
+    is_ensemble_preset,
+)
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -50,6 +55,35 @@ def separate_instrumental(
     instrumental = _pick_instrumental(output_files, output_dir)
     logger.info("Separation complete: %s", instrumental)
     return instrumental
+
+
+def denoise_instrumental(
+    input_path: Path,
+    output_dir: Path,
+    progress_callback: Callable[[int, str], None] | None = None,
+    *,
+    dest_name: str = "instrumental_denoised.wav",
+) -> Path:
+    """
+    Run UVR DeNoise-Lite on an instrumental bed and canonicalize the clean stem.
+
+    First call may download ``UVR-DeNoise-Lite.pth`` into the models directory.
+    Returns the stable ``dest_name`` path (default ``instrumental_denoised.wav``).
+    """
+    preset = get_preset(DENOISE_LITE_MODEL_ID)
+    if preset is None:
+        raise ValueError(f"Missing cleanup preset: {DENOISE_LITE_MODEL_ID}")
+
+    output_files = _separate(
+        input_path=input_path,
+        output_dir=output_dir,
+        preset=preset,
+        progress_callback=progress_callback,
+    )
+    clean = _pick_denoise_clean(output_files, output_dir)
+    canonical = canonicalize_instrumental(clean, output_dir, dest_name=dest_name)
+    logger.info("Denoise Lite complete: %s (from %s)", canonical.name, clean.name)
+    return canonical
 
 
 def canonicalize_instrumental(
@@ -168,6 +202,69 @@ def _resolve_output_path(path_str: str, output_dir: Path) -> Path:
         return path.resolve()
 
     return in_output_dir
+
+
+def _looks_like_denoise_clean(name: str) -> bool:
+    """True for UVR 'No Noise' / clean bed stems."""
+    n = name.lower()
+    return (
+        "no noise" in n
+        or "nonoise" in n
+        or "no_noise" in n
+        or "(clean)" in n
+        or "_clean" in n
+    )
+
+
+def _looks_like_denoise_residual(name: str) -> bool:
+    """True for the residual Noise stem (not the bed we want to keep)."""
+    n = name.lower()
+    if _looks_like_denoise_clean(n):
+        return False
+    # Strip model-family tokens so 'DeNoise' does not count as residual 'noise'.
+    stripped = n.replace("denoise", "").replace("de-noise", "")
+    return "noise" in stripped
+
+
+def _pick_denoise_clean(output_files: list[str], output_dir: Path) -> Path:
+    """
+    Choose the cleaned bed from a DeNoise model run.
+
+    Prefer explicit No Noise / clean names; never prefer the residual Noise stem.
+    Falls back to the normal instrumental picker if naming is unfamiliar.
+    """
+    candidates = [
+        _resolve_output_path(f, output_dir)
+        for f in output_files
+        if _resolve_output_path(f, output_dir).name not in _MANAGED_STEMS
+    ]
+    existing = [p for p in candidates if p.exists() and p.name not in _MANAGED_STEMS]
+
+    for path in existing:
+        if _looks_like_denoise_clean(path.name):
+            logger.info("Picked denoise clean stem: %s", path.name)
+            return path
+
+    non_residual = [p for p in existing if not _looks_like_denoise_residual(p.name)]
+    if len(non_residual) == 1:
+        logger.info("Picked denoise non-residual stem: %s", non_residual[0].name)
+        return non_residual[0]
+    if non_residual:
+        # Prefer instrumental-like names among non-residual outputs.
+        for path in non_residual:
+            name = path.name.lower()
+            if "instrumental" in name or "_inst" in name:
+                logger.info("Picked denoise instrumental-like stem: %s", path.name)
+                return path
+        logger.info("Picked first denoise non-residual stem: %s", non_residual[0].name)
+        return non_residual[0]
+
+    logger.warning(
+        "No explicit denoise clean stem found; falling back to instrumental picker. "
+        "Returned: %s",
+        output_files,
+    )
+    return _pick_instrumental(output_files, output_dir)
 
 
 def _pick_instrumental(output_files: list[str], output_dir: Path) -> Path:
