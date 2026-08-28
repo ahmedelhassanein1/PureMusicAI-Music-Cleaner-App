@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  DenoiseModelId,
   downloadUrl,
   fetchJob,
   fetchModels,
@@ -57,7 +58,7 @@ export default function App() {
   const [karaokeModelId, setKaraokeModelId] = useState("karaoke_mdx_kara2");
   const [choirAggressiveness, setChoirAggressiveness] = useState(0);
   const [sfxStrength, setSfxStrength] = useState(100);
-  const [enableDenoise, setEnableDenoise] = useState(false);
+  const [denoiseModelId, setDenoiseModelId] = useState<DenoiseModelId>("");
   const [mp3Bitrate, setMp3Bitrate] = useState<Mp3Bitrate>(192);
   const [file, setFile] = useState<File | null>(null);
   const [referenceClips, setReferenceClips] = useState<ReferenceClipItem[]>([]);
@@ -195,7 +196,7 @@ export default function App() {
         sfxStrength: sfxStrength / 100,
         karaokeModelId,
         choirAggressiveness: choirAggressiveness / 100,
-        enableDenoise,
+        denoiseModelId,
         referenceClips: enabledRefs,
       });
       setJobId(result.job_id);
@@ -384,21 +385,25 @@ export default function App() {
             </p>
           </label>
 
-          <label className="denoise-toggle" htmlFor="enable-denoise">
-            <input
-              id="enable-denoise"
-              type="checkbox"
-              checked={enableDenoise}
+          <label className="field-control denoise-control" htmlFor="denoise-model">
+            <span className="field-label">Denoise (optional)</span>
+            <select
+              id="denoise-model"
+              value={denoiseModelId}
               disabled={isBusy}
-              onChange={(e) => setEnableDenoise(e.target.checked)}
-            />
-            <span>
-              <span className="denoise-toggle-title">Denoise (Lite)</span>
-              <span className="slider-hint denoise-toggle-hint">
-                Optional UVR DeNoise-Lite pass after vocal removal. Helps with
-                hiss/hum; may not erase loud anime SFX.
-              </span>
-            </span>
+              onChange={(e) =>
+                setDenoiseModelId(e.target.value as DenoiseModelId)
+              }
+            >
+              <option value="">Off</option>
+              <option value="denoise_lite">Lite — gentler hiss/hum cleanup</option>
+              <option value="denoise">Standard — stronger UVR DeNoise</option>
+            </select>
+            <p className="slider-hint">
+              Runs after vocal removal on the instrumental bed. Helps with
+              hiss/hum; may not erase loud anime SFX. Standard can thin air or
+              cymbals more than Lite.
+            </p>
           </label>
 
           <div className="field-control">

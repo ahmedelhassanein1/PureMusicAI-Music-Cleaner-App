@@ -133,6 +133,17 @@ _CLEANUP_PRESETS: list[ModelPreset] = [
         arch="vr",
         category="cleanup",
     ),
+    ModelPreset(
+        id="denoise",
+        name="Denoise",
+        description=(
+            "UVR DeNoise — standard denoise on an instrumental bed. Stronger than Lite; "
+            "may thin air/cymbals more. Still not aimed at loud anime SFX."
+        ),
+        model_filename="UVR-DeNoise.pth",
+        arch="vr",
+        category="cleanup",
+    ),
 ]
 
 _ENSEMBLE_PRESETS: list[ModelPreset] = [
@@ -179,6 +190,8 @@ PRESETS: list[ModelPreset] = (
 DEFAULT_KARAOKE_MODEL_ID = "karaoke_mdx_kara2"
 REFERENCE_INSTRUMENTAL_MODEL_ID = "balanced"
 DENOISE_LITE_MODEL_ID = "denoise_lite"
+DENOISE_MODEL_ID = "denoise"
+DENOISE_PRESET_IDS = frozenset({DENOISE_LITE_MODEL_ID, DENOISE_MODEL_ID})
 
 
 def get_preset(model_id: str) -> ModelPreset | None:
@@ -186,6 +199,16 @@ def get_preset(model_id: str) -> ModelPreset | None:
         if preset.id == model_id:
             return preset
     return None
+
+
+def is_denoise_preset(model_id: str) -> bool:
+    """True when ``model_id`` is a registered cleanup denoise preset."""
+    return model_id in DENOISE_PRESET_IDS
+
+
+def list_cleanup_presets() -> list[dict[str, str | bool]]:
+    """Cleanup-only presets (denoise) for optional post-UVR polish UI."""
+    return [_preset_to_dict(p) for p in PRESETS if p.category == "cleanup"]
 
 
 def list_presets() -> list[dict[str, str | bool]]:

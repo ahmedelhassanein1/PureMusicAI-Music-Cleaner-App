@@ -66,6 +66,7 @@ def create_job(model_id: str, original_filename: str) -> dict[str, Any]:
         "sfx_classes_detected": [],
         "sfx_strength": 1.0,
         "enable_denoise": False,
+        "denoise_model_id": None,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
     }
