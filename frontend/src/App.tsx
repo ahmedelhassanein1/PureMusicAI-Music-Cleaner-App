@@ -12,6 +12,7 @@ const STAGE_LABELS: Record<string, string> = {
   queued: "Waiting in queue",
   loading_model: "Loading model weights",
   separating: "Separating vocals from music",
+  denoising: "Denoising instrumental",
   separating_karaoke: "Running karaoke separation for choir",
   preserving_choir: "Preserving backing vocals and choir",
   detecting_sfx: "Scanning for sound effects",
@@ -56,6 +57,7 @@ export default function App() {
   const [karaokeModelId, setKaraokeModelId] = useState("karaoke_mdx_kara2");
   const [choirAggressiveness, setChoirAggressiveness] = useState(0);
   const [sfxStrength, setSfxStrength] = useState(100);
+  const [enableDenoise, setEnableDenoise] = useState(false);
   const [mp3Bitrate, setMp3Bitrate] = useState<Mp3Bitrate>(192);
   const [file, setFile] = useState<File | null>(null);
   const [referenceClips, setReferenceClips] = useState<ReferenceClipItem[]>([]);
@@ -193,6 +195,7 @@ export default function App() {
         sfxStrength: sfxStrength / 100,
         karaokeModelId,
         choirAggressiveness: choirAggressiveness / 100,
+        enableDenoise,
         referenceClips: enabledRefs,
       });
       setJobId(result.job_id);
@@ -379,6 +382,23 @@ export default function App() {
               0% keeps all SFX · 100% mutes detected explosions, whooshes, and
               similar effects as much as possible
             </p>
+          </label>
+
+          <label className="denoise-toggle" htmlFor="enable-denoise">
+            <input
+              id="enable-denoise"
+              type="checkbox"
+              checked={enableDenoise}
+              disabled={isBusy}
+              onChange={(e) => setEnableDenoise(e.target.checked)}
+            />
+            <span>
+              <span className="denoise-toggle-title">Denoise (Lite)</span>
+              <span className="slider-hint denoise-toggle-hint">
+                Optional UVR DeNoise-Lite pass after vocal removal. Helps with
+                hiss/hum; may not erase loud anime SFX.
+              </span>
+            </span>
           </label>
 
           <div className="field-control">
