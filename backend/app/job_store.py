@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 PIPELINE_STAGES = (
     "queued",
     "separating",
+    "denoising",
     "separating_karaoke",
     "preserving_choir",
     "detecting_sfx",
@@ -64,6 +65,7 @@ def create_job(model_id: str, original_filename: str) -> dict[str, Any]:
         "sfx_segment_count": None,
         "sfx_classes_detected": [],
         "sfx_strength": 1.0,
+        "enable_denoise": False,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
     }

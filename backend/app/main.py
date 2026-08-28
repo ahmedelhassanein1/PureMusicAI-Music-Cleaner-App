@@ -3,9 +3,10 @@ FastAPI application — upload, job status, download.
 
 Pipeline per job:
   1. UVR instrumental separation → instrumental_raw.wav (standard bed)
-  2. Optional choir preservation (karaoke stem + heuristics) when enabled
-  3. SFX detection (generic AudioSet) + optional custom reference matching
-  4. Remix (choir overlay + SFX) → final downloadable WAV (MP3 on download)
+  2. Optional DeNoise-Lite polish → instrumental_denoised.wav
+  3. Optional choir preservation (karaoke stem + heuristics) when enabled
+  4. SFX detection (generic AudioSet) + optional custom reference matching
+  5. Remix (choir overlay + SFX) → final downloadable WAV (MP3 on download)
 """
 
 from __future__ import annotations
@@ -40,7 +41,11 @@ from app.pipeline.model_registry import (
     list_karaoke_presets,
     list_presets,
 )
-from app.pipeline.separator import canonicalize_instrumental, separate_instrumental
+from app.pipeline.separator import (
+    canonicalize_instrumental,
+    denoise_instrumental,
+    separate_instrumental,
+)
 from app.pipeline.sfx import detect_sfx_segments
 from app.pipeline.custom_sfx import embed_reference_clips, match_references_in_mix
 from app.settings import settings
@@ -126,6 +131,7 @@ async def upload(
     karaoke_model_id: str = Form(default=DEFAULT_KARAOKE_MODEL_ID),
     choir_aggressiveness: float = Form(default=0.0),
     sfx_strength: float = Form(default=1.0),
+    enable_denoise: bool = Form(default=False),
     reference_clips: Annotated[list[UploadFile], File()] = [],
 ) -> dict:
     """
@@ -133,6 +139,7 @@ async def upload(
 
     choir_aggressiveness: 0.0–1.0 — blends extracted choir back onto the bed.
     sfx_strength: 0.0–1.0 (1.0 = full attenuation in detected SFX regions).
+    enable_denoise: run UVR DeNoise-Lite on the instrumental bed before choir/SFX.
     reference_clips: optional short SFX samples for custom matching (Phase 2b).
     """
     preset = get_preset(model_id)
@@ -146,6 +153,7 @@ async def upload(
 
     choir_aggressiveness = float(max(0.0, min(1.0, choir_aggressiveness)))
     sfx_strength = float(max(0.0, min(1.0, sfx_strength)))
+    enable_denoise = _as_bool(enable_denoise)
 
     karaoke_preset = get_preset(karaoke_model_id)
     if choir_aggressiveness > 0 and (
@@ -173,6 +181,7 @@ async def upload(
         sfx_strength=sfx_strength,
         karaoke_model_id=karaoke_model_id,
         choir_aggressiveness=choir_aggressiveness,
+        enable_denoise=enable_denoise,
         custom_sfx_clip_count=len(ref_uploads),
     )
 
@@ -220,6 +229,7 @@ async def upload(
         choir_aggressiveness,
         sfx_strength,
         reference_paths,
+        enable_denoise,
     )
     return {"job_id": job_id, "status": status["status"]}
 
@@ -387,14 +397,17 @@ def _run_pipeline(
     choir_aggressiveness: float,
     sfx_strength: float,
     reference_paths: list[Path] | None = None,
+    enable_denoise: bool = False,
 ) -> None:
     """
-    Background worker: UVR separation → optional choir → SFX scan → remix finalize.
+    Background worker: UVR → optional denoise → optional choir → SFX → remix.
 
-    Download defaults to instrumental_raw.wav. instrumental.wav is used when SFX
-    regions were detected and attenuated during the remix step.
+    Download defaults to instrumental_raw.wav. instrumental_denoised.wav is used
+    when denoise ran and no SFX remix file is produced. instrumental.wav is used
+    when SFX regions were attenuated during remix.
     """
     reference_paths = list(reference_paths or [])
+    enable_denoise = bool(enable_denoise)
     try:
         standard_preset, karaoke_preset, choir_aggressiveness, choir_enabled = (
             _resolve_pipeline_presets(model_id, karaoke_model_id, choir_aggressiveness)
@@ -410,7 +423,12 @@ def _run_pipeline(
         job_store.set_stage(job_id, "separating", progress=5, status="processing")
 
         def on_standard_separate(percent: int, _stage: str) -> None:
-            cap = 35 if choir_enabled else 65
+            if enable_denoise:
+                cap = 28
+            elif choir_enabled:
+                cap = 35
+            else:
+                cap = 65
             mapped = 5 + int((percent / 100) * (cap - 5))
             job_store.update_job(job_id, progress=mapped)
 
@@ -422,6 +440,21 @@ def _run_pipeline(
         )
         work_path = canonicalize_instrumental(uvr_output, directory)
         choir_candidate_path: Path | None = None
+
+        # --- Step 1b: optional DeNoise-Lite on the instrumental bed ---
+        if enable_denoise:
+            job_store.set_stage(job_id, "denoising", progress=30)
+
+            def on_denoise(percent: int, _stage: str) -> None:
+                mapped = 30 + int((percent / 100) * 6)
+                job_store.update_job(job_id, progress=mapped)
+
+            work_path = denoise_instrumental(
+                input_path=work_path,
+                output_dir=directory,
+                progress_callback=on_denoise,
+            )
+            logger.info("Job %s: DeNoise-Lite applied → %s", job_id, work_path.name)
 
         # --- Step 2: optional choir candidate extraction ---
         if choir_enabled and karaoke_preset is not None:
@@ -489,7 +522,13 @@ def _run_pipeline(
         apply_sfx = (
             (bool(sfx_segments) or bool(custom_matches)) and sfx_strength > 0
         )
-        download_name = "instrumental.wav" if apply_sfx else "instrumental_raw.wav"
+        if apply_sfx:
+            download_name = "instrumental.wav"
+        elif enable_denoise:
+            # Keep instrumental_raw.wav as the undenoised UVR bed for A/B.
+            download_name = "instrumental_denoised.wav"
+        else:
+            download_name = "instrumental_raw.wav"
         final_path = directory / download_name
 
         job_store.set_stage(job_id, "remixing", progress=88)
@@ -506,7 +545,11 @@ def _run_pipeline(
         )
 
         if not apply_sfx:
-            logger.info("Job %s: no SFX to remove — download will use UVR stem", job_id)
+            logger.info(
+                "Job %s: no SFX remix — download will use %s",
+                job_id,
+                download_name,
+            )
 
         job_store.set_stage(
             job_id,
@@ -518,3 +561,14 @@ def _run_pipeline(
     except Exception as exc:  # noqa: BLE001 — surface error to client via status.json
         logger.exception("Job %s failed", job_id)
         job_store.update_job(job_id, status="failed", stage="error", error=str(exc))
+
+
+def _as_bool(value: object) -> bool:
+    """Normalize multipart form booleans (bool or common string forms)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
