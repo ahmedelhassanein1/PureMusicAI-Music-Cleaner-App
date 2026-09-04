@@ -33,15 +33,15 @@ Runs locally via **WSL + Docker** — free, no account, files stay on your machi
 
 ## Demos
 
-Screen recordings of the app in action. Click play to watch inline, or use the link to open the video in a new tab.
+Screen recordings of the app in action. Links open in a new tab and play in your browser (no download required).
 
 ### Demo 1 — Vocal removal
 
-[Open Demo 1 — Vocal removal](assets/demos/demo-1-vocal-removal.mp4)
+https://github.com/user-attachments/assets/94656aee-237b-42aa-a33d-0bf997309dda
 
 ### Demo 2 — SFX reduction + choir preservation
 
-[Open Demo 2 — SFX reduction + choir preservation](assets/demos/demo-2-sfx-choir-preservation.mp4)
+https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839
 
 *Source audio for this demo:* [YouTube](https://www.youtube.com/watch?v=JPWDlEAvClk&list=RDJPWDlEAvClk&start_radio=1)
 
@@ -130,9 +130,9 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 
 | Preset                      | GPU helpful?         | Rough time (4-min song)          |
 | --------------------------- | -------------------- | -------------------------------- |
-| **Fast**                    | Optional             | 3–8 min (CPU) · 20–60 s (GPU)    |
-| **Balanced**                | Optional             | 2–6 min (CPU) · 30–90 s (GPU)    |
-| **High Quality** (Roformer) | Strongly recommended | 20–40 min (CPU) · 5–15 min (GPU) |
+| **Fast**                    | Optional             | 5-10 min (CPU) · 2-3 min (GPU)    |
+| **Balanced**                | Optional             | 10-15 min (CPU) · 4-6 min (GPU)    |
+| **High Quality** (Roformer) | Strongly recommended | 20–40 min (CPU) · 10-15 min (GPU) |
 | **Ensemble**                | Recommended          | 30–90+ min (GPU)                 |
 
 
