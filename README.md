@@ -246,7 +246,7 @@ music-cleaner/
 | **API**       | FastAPI, Uvicorn, Pydantic           | REST endpoints, file upload, background jobs |
 | **ML**        | PyTorch, audio-separator, UVR models | Vocal/instrumental separation                |
 | **Audio**     | librosa, soundfile, NumPy, ffmpeg    | Analysis, WAV I/O, MP3 export                |
-| **Detection** | PANNs (SFX), OmniVAD (speech)        | Find non-musical regions to attenuate        |
+| **Detection** | PANNs (SFX)                          | Find non-musical regions to attenuate        |
 | **Storage**   | Local filesystem + `status.json`     | Job state (no Redis/Postgres)                |
 | **Packaging** | Docker, Docker Compose               | Reproducible dev environment on WSL          |
 | **Tests**     | pytest, Vitest, Testing Library      | Automated API + UI tests                     |

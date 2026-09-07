@@ -1,7 +1,7 @@
 """
 Filesystem-backed job store — one folder per job with a status.json file.
 
-Phase 2 adds explicit pipeline stages (detecting_speech, removing_sfx, etc.)
+Phase 2 adds explicit pipeline stages (detecting_sfx, removing_sfx, etc.)
 so the frontend can show where a long-running job is in the pipeline.
 """
 
@@ -86,7 +86,7 @@ def update_job(job_id: str, **fields: Any) -> dict[str, Any]:
     """
     Merge new fields into status.json and bump updated_at.
 
-    Example: update_job(id, progress=50, speech_segment_count=3)
+    Example: update_job(id, progress=50, sfx_segment_count=3)
     """
     job_dir = settings.jobs_dir / job_id
     status = get_job(job_id)
@@ -111,7 +111,7 @@ def set_stage(
     Update the current pipeline stage shown to the frontend.
 
     Phase 2 stages: detecting_sfx → removing_sfx.
-    Optional progress (0–100) and extra fields (e.g. speech_segment_count) can
+    Optional progress (0–100) and extra fields (e.g. sfx_segment_count) can
     be passed in the same write so the UI gets one consistent snapshot.
     """
     fields: dict[str, Any] = {"stage": stage}
