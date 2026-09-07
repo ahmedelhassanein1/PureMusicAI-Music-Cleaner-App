@@ -373,7 +373,7 @@ cat backend/jobs/<job-id>/status.json
 | `GET`  | `/api/models?full=true`   | Full audio-separator catalog                                                   |
 | `POST` | `/api/upload`             | Upload audio (+ optional `denoise_model_id`, `reference_clips`) → `{ job_id }` |
 | `GET`  | `/api/jobs/{id}`          | Job status and progress                                                        |
-| `GET`  | `/api/jobs/{id}/download` | Download result (default MP3; `?format=wav`; `?bitrate=192                     |
+| `GET`  | `/api/jobs/{id}/download` | Download result (default MP3; `?format=wav`; `?bitrate=192` or `320`) |
 
 
 ---
