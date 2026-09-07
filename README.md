@@ -23,9 +23,15 @@ Runs locally via **WSL + Docker** — free, no account, files stay on your machi
 
 **Choir:** Use **choir aggressiveness** + a **karaoke sub-model** to improve backing vocals; results still vary by track.
 
-**SFX:** PANNs ducks flagged regions, but many hits and whooshes are missed (short duration, dense mix, label gaps).
+**SFX (generic):** PANNs scans for common AudioSet classes (explosions, whooshes, punches, etc.) and attenuates flagged regions. Many hits are missed — short duration, dense mixes, and label gaps are common failure modes.
+
+**Denoise (optional):** **Lite** or **Standard** UVR DeNoise runs on the instrumental *after* vocal removal. Helps with steady hiss/hum; **does not** reliably remove loud anime/game SFX. Standard can thin air and cymbals more than Lite.
+
+**Custom reference SFX (optional):** Upload short isolated clips (e.g. ki blast, aura, whoosh) so the app can search for similar sounds in the mix. Matching is similarity-based and imperfect — close references work better than vague ones. Attenuation uses spectral masking where possible; some bleed and false matches are normal.
 
 ---
+
+
 
 ## Demos
 
@@ -33,15 +39,19 @@ Screen recordings of the app in action. Links open in a new tab and play in your
 
 ### Demo 1 — Vocal removal
 
-https://github.com/user-attachments/assets/94656aee-237b-42aa-a33d-0bf997309dda
+[https://github.com/user-attachments/assets/94656aee-237b-42aa-a33d-0bf997309dda](https://github.com/user-attachments/assets/94656aee-237b-42aa-a33d-0bf997309dda)
 
 ### Demo 2 — SFX reduction + choir preservation
 
-https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839
+[https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839](https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839)
 
 *Source audio for this demo:* [YouTube](https://www.youtube.com/watch?v=JPWDlEAvClk&list=RDJPWDlEAvClk&start_radio=1)
 
+The demos above show **vocal removal** and **generic SFX + choir** flow. **Denoise** and **custom reference SFX** are available in the UI but are not shown in these recordings.
+
 ---
+
+
 
 ## How to use the app
 
@@ -52,21 +62,28 @@ https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839
   - **Balanced** — default quality/speed tradeoff
   - **High Quality** — Roformer; slower, cleaner output (GPU recommended)
   - **Classic** / **Ensemble** presets — more options for advanced users
-4. **Optional — Choir preservation:** set **Choir aggressiveness** above 0% and pick a **Karaoke sub-model**.
-5. **Optional — SFX reduction:** strength slider (100% = max). Often weak on anime/game audio.
-6. Click **Start processing** and watch the progress panel.
-7. When status is **completed**, download **MP3** (192k or 320k) or **WAV**.
+4. **Optional — Denoise:** **Off** (default), **Lite**, or **Standard** — post-separation cleanup on the instrumental bed. Start with Lite if unsure.
+5. **Optional — Choir preservation:** set **Choir aggressiveness** above 0% and pick a **Karaoke sub-model**.
+6. **Optional — SFX reduction:** strength slider (100% = max). Reduces generic PANNs-detected SFX; often weak on anime/game audio.
+7. **Optional — Custom reference SFX:** add up to **10** short isolated clips; enable/disable per clip. Best for recurring sounds you can provide a clean sample of — not a guarantee of full removal.
+8. Click **Start processing** and watch the progress panel (stage labels show separation, denoise, SFX matching, remix, etc.).
+9. When status is **completed**, download **MP3** (192k or 320k) or **WAV**.
 
 **Tips**
 
 - First run downloads model weights (hundreds of MB) — expect a longer wait.
+- **Denoise** adds an extra UVR pass when enabled (Lite or Standard).
 - **Ensemble** models run multiple full separation passes; a 4-minute song can take 30–60+ minutes.
 - Refreshing the page during a job should resume polling (job ID is stored in the browser for the session).
 - Jobs on disk are auto-deleted after **24 hours**.
 
 ---
 
+
+
 ## Running the app
+
+
 
 ### Prerequisites
 
@@ -74,6 +91,8 @@ https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839
 - **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** with WSL integration enabled
 - **8 GB+ RAM** (16 GB recommended)
 - **Optional:** NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for faster separation
+
+
 
 ### Clone and start
 
@@ -103,7 +122,11 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 
 ---
 
+
+
 ## Hardware requirements
+
+
 
 ### System
 
@@ -116,15 +139,17 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 | **GPU**   | None (CPU works) | NVIDIA 6 GB+ VRAM (e.g. RTX 3050 Ti)           |
 
 
+
+
 ### Model choice vs your machine
 
 
-| Preset                      | GPU helpful?         | Rough time (4-min song)          |
-| --------------------------- | -------------------- | -------------------------------- |
+| Preset                      | GPU helpful?         | Rough time (4-min song)           |
+| --------------------------- | -------------------- | --------------------------------- |
 | **Fast**                    | Optional             | 5-10 min (CPU) · 2-3 min (GPU)    |
-| **Balanced**                | Optional             | 10-15 min (CPU) · 4-6 min (GPU)    |
+| **Balanced**                | Optional             | 10-15 min (CPU) · 4-6 min (GPU)   |
 | **High Quality** (Roformer) | Strongly recommended | 20–40 min (CPU) · 10-15 min (GPU) |
-| **Ensemble**                | Recommended          | 30–90+ min (GPU)                 |
+| **Ensemble**                | Recommended          | 30–90+ min (GPU)                  |
 
 
 Times are approximate — track length and system load matter.
@@ -135,31 +160,40 @@ Times are approximate — track length and system load matter.
 | Workload                 | Typical device         |
 | ------------------------ | ---------------------- |
 | VR / Roformer separation | GPU when `DEVICE=cuda` |
+| UVR DeNoise (Lite/Std)   | GPU when `DEVICE=cuda` |
 | MDX-Net (Balanced)       | Often CPU (ONNX)       |
 | SFX detection (PANNs)    | CPU                    |
+| Custom SFX matching      | CPU                    |
 | MP3 export (ffmpeg)      | CPU                    |
 | Choir heuristics + remix | CPU                    |
 
 
 ---
 
+
+
 ## How it works (pipeline)
 
 ```mermaid
 flowchart LR
   upload[Upload] --> separate[UVR_separation]
-  separate --> choir[Choir_optional]
-  separate --> sfx[SFX_detection]
-  choir --> remix[Remix_and_normalize]
-  sfx --> remix
+  separate --> denoise[Denoise_optional]
+  denoise --> choir[Choir_optional]
+  choir --> genericSfx[Generic_SFX_PANNs]
+  genericSfx --> customSfx[Custom_reference_match_optional]
+  customSfx --> remix[Remix_and_normalize]
   remix --> download[Download_MP3_or_WAV]
 ```
 
 
 
+**Pipeline stages (in order):** separation → denoise (optional) → choir preservation (optional) → generic SFX scan → custom reference matching (optional) → remix → download.
+
 Each job is a folder under `backend/jobs/` with a `status.json` file tracking progress. No database — everything is on disk.
 
 ---
+
+
 
 ## Project structure
 
@@ -185,6 +219,8 @@ music-cleaner/
 │           ├── separator.py
 │           ├── choir.py
 │           ├── sfx.py
+│           ├── custom_sfx.py    # Reference clip embeddings + matching
+│           ├── spectral_sfx.py  # Spectral mask for matched custom SFX
 │           └── remix.py
 └── frontend/
     ├── Dockerfile
@@ -199,6 +235,8 @@ music-cleaner/
 
 ---
 
+
+
 ## Tech stack
 
 
@@ -208,7 +246,7 @@ music-cleaner/
 | **API**       | FastAPI, Uvicorn, Pydantic           | REST endpoints, file upload, background jobs |
 | **ML**        | PyTorch, audio-separator, UVR models | Vocal/instrumental separation                |
 | **Audio**     | librosa, soundfile, NumPy, ffmpeg    | Analysis, WAV I/O, MP3 export                |
-| **Detection** | PANNs (SFX), OmniVAD (speech)        | Find non-musical regions to attenuate        |
+| **Detection** | PANNs (SFX)                          | Find non-musical regions to attenuate        |
 | **Storage**   | Local filesystem + `status.json`     | Job state (no Redis/Postgres)                |
 | **Packaging** | Docker, Docker Compose               | Reproducible dev environment on WSL          |
 | **Tests**     | pytest, Vitest, Testing Library      | Automated API + UI tests                     |
@@ -217,6 +255,8 @@ music-cleaner/
 **Not used:** accounts, cloud storage, Redis, Celery, or a SQL database.
 
 ---
+
+
 
 ## Running tests
 
@@ -237,6 +277,8 @@ npm test
 
 ---
 
+
+
 ## Manual smoke test checklist
 
 Use a **30–60 second** clip first.
@@ -252,7 +294,11 @@ Use a **30–60 second** clip first.
 
 ---
 
+
+
 ## Troubleshooting
+
+
 
 ### Docker and startup
 
@@ -264,15 +310,21 @@ Use a **30–60 second** clip first.
 | `gpus: all` error            | Remove GPU block in `docker-compose.yml`; set `DEVICE=cpu` |
 
 
+
+
 ### During processing
 
 
-| Problem                            | Fix                                                               |
-| ---------------------------------- | ----------------------------------------------------------------- |
-| Very slow first job                | Model download; weights cache in `backend/models/`                |
-| Progress stuck low on **Ensemble** | Normal — multiple passes; can take 30–60+ min                     |
-| **Job not found**                  | Don't delete `backend/jobs/` while running; jobs expire after 24h |
-| UI lost job after refresh          | Re-upload if needed; check `docker compose logs backend`          |
+| Problem                            | Fix                                                                |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| Very slow first job                | Model download; weights cache in `backend/models/`                 |
+| Progress stuck low on **Ensemble** | Normal — multiple passes; can take 30–60+ min                      |
+| **Denoise** barely changed audio   | Expected on loud SFX; denoise targets hiss/hum, not impact hits    |
+| **Custom SFX** still audible       | Try a cleaner, shorter reference clip; reduce bleed is best-effort |
+| **Job not found**                  | Don't delete `backend/jobs/` while running; jobs expire after 24h  |
+| UI lost job after refresh          | Re-upload if needed; check `docker compose logs backend`           |
+
+
 
 
 ### Downloads and uploads
@@ -287,6 +339,8 @@ Use a **30–60 second** clip first.
 | CORS error       | Open `http://localhost:5173`, not `:8000` directly     |
 
 
+
+
 ### Performance
 
 
@@ -294,6 +348,8 @@ Use a **30–60 second** clip first.
 | -------------- | ----------------------------------------------------- |
 | Out of memory  | Use **Fast**; shorter clip; close other apps          |
 | Slow on laptop | Use **Fast** or **Balanced**; enable GPU if available |
+
+
 
 
 ### Debug logs
@@ -305,20 +361,24 @@ cat backend/jobs/<job-id>/status.json
 
 ---
 
+
+
 ## API reference
 
 
-| Method | Endpoint                  | Description                                                |
-| ------ | ------------------------- | ---------------------------------------------------------- |
-| `GET`  | `/api/health`             | Health check                                               |
-| `GET`  | `/api/models`             | Curated presets + karaoke models                           |
-| `GET`  | `/api/models?full=true`   | Full audio-separator catalog                               |
-| `POST` | `/api/upload`             | Upload audio → `{ job_id }`                                |
-| `GET`  | `/api/jobs/{id}`          | Job status and progress                                    |
-| `GET`  | `/api/jobs/{id}/download` | Download result (default MP3; `?format=wav`; `?bitrate=192 |
+| Method | Endpoint                  | Description                                                                    |
+| ------ | ------------------------- | ------------------------------------------------------------------------------ |
+| `GET`  | `/api/health`             | Health check                                                                   |
+| `GET`  | `/api/models`             | Curated presets + karaoke models                                               |
+| `GET`  | `/api/models?full=true`   | Full audio-separator catalog                                                   |
+| `POST` | `/api/upload`             | Upload audio (+ optional `denoise_model_id`, `reference_clips`) → `{ job_id }` |
+| `GET`  | `/api/jobs/{id}`          | Job status and progress                                                        |
+| `GET`  | `/api/jobs/{id}/download` | Download result (default MP3; `?format=wav`; `?bitrate=192` or `320`) |
 
 
 ---
+
+
 
 ## Credits
 

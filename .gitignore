@@ -6,7 +6,7 @@ venv/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
-.cursor/
+
 
 # Node
 node_modules/
@@ -16,6 +16,9 @@ dist/
 # Jobs & models (large / generated)
 backend/jobs/
 backend/models/
+
+# Phase 2b — local-only test audio + notes (never commit; includes README.md)
+test/fixtures/
 
 # OS / IDE
 .DS_Store

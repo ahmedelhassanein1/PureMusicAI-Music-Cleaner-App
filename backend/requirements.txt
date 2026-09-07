@@ -9,6 +9,5 @@ numpy>=1.26.0,<2.1.0
 soundfile==0.13.1
 librosa==0.10.2.post1
 
-# Phase 2 — speech + SFX detection
-omnivad>=0.2.12
+# Phase 2 — SFX detection
 panns-inference>=0.1.0

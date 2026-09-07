@@ -11,8 +11,11 @@ export type ModelsResponse = {
   source: string;
   models: ModelPreset[];
   karaoke_models?: ModelPreset[];
+  cleanup_models?: ModelPreset[];
   default_karaoke_model_id?: string;
 };
+
+export type DenoiseModelId = "" | "denoise_lite" | "denoise";
 
 export type JobStatus = {
   id: string;
@@ -22,6 +25,8 @@ export type JobStatus = {
   model_id: string;
   karaoke_model_id?: string;
   choir_aggressiveness?: number;
+  enable_denoise?: boolean;
+  denoise_model_id?: string | null;
   original_filename: string;
   output_filename: string | null;
   error: string | null;
@@ -42,13 +47,22 @@ export async function uploadAudio(
     sfxStrength?: number;
     karaokeModelId?: string;
     choirAggressiveness?: number;
+    enableDenoise?: boolean;
+    denoiseModelId?: DenoiseModelId;
+    referenceClips?: File[];
   } = {},
 ): Promise<{ job_id: string }> {
   const {
     sfxStrength = 1.0,
     karaokeModelId = "karaoke_mdx_kara2",
     choirAggressiveness = 0,
+    enableDenoise = false,
+    denoiseModelId = "",
+    referenceClips = [],
   } = options;
+
+  const resolvedDenoiseId: DenoiseModelId =
+    denoiseModelId || (enableDenoise ? "denoise_lite" : "");
 
   const form = new FormData();
   form.append("file", file);
@@ -59,6 +73,11 @@ export async function uploadAudio(
     String(Math.max(0, Math.min(1, choirAggressiveness))),
   );
   form.append("sfx_strength", String(Math.max(0, Math.min(1, sfxStrength))));
+  form.append("enable_denoise", resolvedDenoiseId ? "true" : "false");
+  form.append("denoise_model_id", resolvedDenoiseId);
+  for (const clip of referenceClips) {
+    form.append("reference_clips", clip);
+  }
 
   const res = await fetch(`${API_BASE}/upload`, {
     method: "POST",

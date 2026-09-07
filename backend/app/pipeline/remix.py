@@ -10,6 +10,10 @@ Phase 4 polish (tasks 4.1–4.2):
   - Peak normalization to -1 dBFS before write
 
 Phase 4.3 — MP3 export via ffmpeg (on-demand at download; WAV remains the pipeline master).
+
+Phase 2b-S.4 — custom reference matches use ref-guided spectral masking
+(spectral_sfx). Soft time-domain duck remains only as a per-segment fallback
+when the reference file is missing/unreadable or the spectral edit fails.
 """
 
 from __future__ import annotations
@@ -19,10 +23,13 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import librosa
 import numpy as np
 import soundfile as sf
 
+from app.pipeline.custom_sfx import MatchSegment
 from app.pipeline.sfx import SfxSegment
+from app.pipeline.spectral_sfx import apply_spectral_mask_to_segment
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +37,10 @@ logger = logging.getLogger(__name__)
 TARGET_PEAK_DBFS = -1.0
 CROSSFADE_MS = 20.0
 SFX_PADDING_SEC = 0.03
+
+# Fallback only (time duck): full mute would silence music in the window too.
+# Spectral path uses raw sfx_strength — non-SFX bins are already preserved.
+CUSTOM_SFX_STRENGTH_SCALE = 0.80
 
 # Phase 4.3 — MP3 download defaults.
 DEFAULT_MP3_BITRATE_KBPS = 192
@@ -46,6 +57,8 @@ class RemixPlan:
     choir_gain: float = 0.0
     sfx_segments: tuple[SfxSegment, ...] = ()
     sfx_strength: float = 0.0
+    # Phase 2b.4 — matches from custom_sfx.match_references_in_mix.
+    custom_sfx_segments: tuple[MatchSegment, ...] = ()
 
 
 def finalize_instrumental(plan: RemixPlan) -> Path:
@@ -55,8 +68,9 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
     Order of operations:
       1. Start from the instrumental bed
       2. Optionally add a choir/backing stem at ``choir_gain``
-      3. Optionally attenuate detected SFX regions (with boundary crossfades)
-      4. Normalize peak to ``TARGET_PEAK_DBFS`` and write the output file
+      3. Attenuate generic PANNs SFX regions (time-domain crossfade duck)
+      4. Spectrally mask custom reference matches (time-duck fallback)
+      5. Normalize peak to ``TARGET_PEAK_DBFS`` and write the output file
     """
     choir_gain = float(np.clip(plan.choir_gain, 0.0, 2.0))
     sfx_strength = float(np.clip(plan.sfx_strength, 0.0, 1.0))
@@ -65,7 +79,8 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
         and plan.choir_path is not None
         and plan.choir_path.exists()
     )
-    has_sfx = bool(plan.sfx_segments) and sfx_strength > 0.0
+    has_generic_sfx = bool(plan.sfx_segments) and sfx_strength > 0.0
+    has_custom_sfx = bool(plan.custom_sfx_segments) and sfx_strength > 0.0
 
     audio, sample_rate = _load_audio(plan.instrumental_path)
 
@@ -77,7 +92,7 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
         )
         logger.info("Mixed choir overlay onto instrumental bed")
 
-    if has_sfx:
+    if has_generic_sfx:
         audio = _apply_segment_crossfade(
             audio,
             sample_rate,
@@ -87,8 +102,16 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
             padding_sec=SFX_PADDING_SEC,
         )
         logger.info(
-            "Applied SFX crossfade attenuation (%d segment(s))",
+            "Applied generic SFX crossfade attenuation (%d segment(s))",
             len(plan.sfx_segments),
+        )
+
+    if has_custom_sfx:
+        audio = _apply_custom_spectral_sfx(
+            audio,
+            sample_rate,
+            plan.custom_sfx_segments,
+            strength=sfx_strength,
         )
 
     audio = _normalize_peak_dbfs(audio, target_db=TARGET_PEAK_DBFS)
@@ -99,6 +122,118 @@ def finalize_instrumental(plan: RemixPlan) -> Path:
         TARGET_PEAK_DBFS,
     )
     return plan.output_path
+
+
+def _apply_custom_spectral_sfx(
+    audio: np.ndarray,
+    sample_rate: int,
+    matches: tuple[MatchSegment, ...],
+    *,
+    strength: float,
+) -> np.ndarray:
+    """
+    2b-S.4 — Prefer spectral masking per MatchSegment; soft time-duck fallback.
+
+    Segments are applied in time order so overlapping edits stack predictably.
+    """
+    out = audio
+    fallback: list[MatchSegment] = []
+    spectral_count = 0
+
+    for match in sorted(matches, key=lambda m: (m.start, m.end)):
+        ref_audio = _load_ref_for_spectral(match.ref_path, sample_rate)
+        if ref_audio is None:
+            fallback.append(match)
+            continue
+        try:
+            out = apply_spectral_mask_to_segment(
+                out,
+                sample_rate,
+                match.start,
+                match.end,
+                ref_audio,
+                strength,
+            )
+            spectral_count += 1
+        except Exception as exc:  # noqa: BLE001 — keep job alive; duck this hit
+            logger.warning(
+                "Spectral custom SFX failed for %s [%.2f–%.2f]: %s — time-duck fallback",
+                match.label,
+                match.start,
+                match.end,
+                exc,
+            )
+            fallback.append(match)
+
+    if fallback:
+        duck_strength = float(np.clip(strength * CUSTOM_SFX_STRENGTH_SCALE, 0.0, 1.0))
+        out = _apply_segment_crossfade(
+            out,
+            sample_rate,
+            _custom_matches_as_sfx_segments(tuple(fallback)),
+            strength=duck_strength,
+            fade_ms=CROSSFADE_MS,
+            padding_sec=SFX_PADDING_SEC,
+        )
+        logger.info(
+            "Custom SFX: %d spectral, %d time-duck fallback (duck_strength=%.2f)",
+            spectral_count,
+            len(fallback),
+            duck_strength,
+        )
+    else:
+        logger.info(
+            "Applied spectral custom SFX (%d segment(s), strength=%.2f)",
+            spectral_count,
+            strength,
+        )
+    return out
+
+
+def _load_ref_for_spectral(
+    ref_path: Path | None,
+    sample_rate: int,
+) -> np.ndarray | None:
+    """Load a reference clip at the bed sample rate, or None if unusable."""
+    if ref_path is None:
+        logger.warning("Custom match missing ref_path — time-duck fallback")
+        return None
+    path = Path(ref_path)
+    if not path.exists():
+        logger.warning("Custom ref not found (%s) — time-duck fallback", path)
+        return None
+    try:
+        # librosa: (n,) mono or (ch, n) multi — spectral helpers want (n,) / (n, ch).
+        ref, _ = librosa.load(str(path), sr=sample_rate, mono=False)
+        ref = np.asarray(ref, dtype=np.float32)
+        if ref.ndim == 2:
+            ref = ref.T
+        if ref.size == 0:
+            logger.warning("Custom ref empty (%s) — time-duck fallback", path.name)
+            return None
+        return ref
+    except Exception as exc:  # noqa: BLE001 — unreadable / decode errors
+        logger.warning(
+            "Failed to load custom ref %s (%s) — time-duck fallback",
+            path.name,
+            exc,
+        )
+        return None
+
+
+def _custom_matches_as_sfx_segments(
+    matches: tuple[MatchSegment, ...],
+) -> list[SfxSegment]:
+    """Convert MatchSegment → SfxSegment for the shared crossfade helper."""
+    return [
+        SfxSegment(
+            start=match.start,
+            end=match.end,
+            label=match.label,
+            score=match.score,
+        )
+        for match in matches
+    ]
 
 
 def export_mp3(

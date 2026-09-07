@@ -334,7 +334,7 @@ def _apply_sfx_gain(
 ) -> np.ndarray:
     """
     Attenuate SFX regions by (1 - strength) with short linear fades.
-    Same envelope idea as speech.py — avoids clicks at boundaries.
+    Short linear fades at segment boundaries avoid clicks.
     """
     out = audio.copy()
     num_samples = out.shape[0]
