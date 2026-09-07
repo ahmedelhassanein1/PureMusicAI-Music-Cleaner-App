@@ -31,23 +31,27 @@ Runs locally via **WSL + Docker** — free, no account, files stay on your machi
 
 ---
 
+
+
 ## Demos
 
 Screen recordings of the app in action. Links open in a new tab and play in your browser (no download required).
 
 ### Demo 1 — Vocal removal
 
-https://github.com/user-attachments/assets/94656aee-237b-42aa-a33d-0bf997309dda
+[https://github.com/user-attachments/assets/94656aee-237b-42aa-a33d-0bf997309dda](https://github.com/user-attachments/assets/94656aee-237b-42aa-a33d-0bf997309dda)
 
 ### Demo 2 — SFX reduction + choir preservation
 
-https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839
+[https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839](https://github.com/user-attachments/assets/845af6f2-1265-4ebe-8c7d-7b70d3cc1839)
 
 *Source audio for this demo:* [YouTube](https://www.youtube.com/watch?v=JPWDlEAvClk&list=RDJPWDlEAvClk&start_radio=1)
 
 The demos above show **vocal removal** and **generic SFX + choir** flow. **Denoise** and **custom reference SFX** are available in the UI but are not shown in these recordings.
 
 ---
+
+
 
 ## How to use the app
 
@@ -75,7 +79,11 @@ The demos above show **vocal removal** and **generic SFX + choir** flow. **Denoi
 
 ---
 
+
+
 ## Running the app
+
+
 
 ### Prerequisites
 
@@ -83,6 +91,8 @@ The demos above show **vocal removal** and **generic SFX + choir** flow. **Denoi
 - **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** with WSL integration enabled
 - **8 GB+ RAM** (16 GB recommended)
 - **Optional:** NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for faster separation
+
+
 
 ### Clone and start
 
@@ -112,7 +122,11 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 
 ---
 
+
+
 ## Hardware requirements
+
+
 
 ### System
 
@@ -125,15 +139,17 @@ Copy `.env.example` to `.env` and adjust paths or `DEVICE` if running components
 | **GPU**   | None (CPU works) | NVIDIA 6 GB+ VRAM (e.g. RTX 3050 Ti)           |
 
 
+
+
 ### Model choice vs your machine
 
 
-| Preset                      | GPU helpful?         | Rough time (4-min song)          |
-| --------------------------- | -------------------- | -------------------------------- |
+| Preset                      | GPU helpful?         | Rough time (4-min song)           |
+| --------------------------- | -------------------- | --------------------------------- |
 | **Fast**                    | Optional             | 5-10 min (CPU) · 2-3 min (GPU)    |
-| **Balanced**                | Optional             | 10-15 min (CPU) · 4-6 min (GPU)    |
+| **Balanced**                | Optional             | 10-15 min (CPU) · 4-6 min (GPU)   |
 | **High Quality** (Roformer) | Strongly recommended | 20–40 min (CPU) · 10-15 min (GPU) |
-| **Ensemble**                | Recommended          | 30–90+ min (GPU)                 |
+| **Ensemble**                | Recommended          | 30–90+ min (GPU)                  |
 
 
 Times are approximate — track length and system load matter.
@@ -154,6 +170,8 @@ Times are approximate — track length and system load matter.
 
 ---
 
+
+
 ## How it works (pipeline)
 
 ```mermaid
@@ -167,13 +185,15 @@ flowchart LR
   remix --> download[Download_MP3_or_WAV]
 ```
 
+
+
 **Pipeline stages (in order):** separation → denoise (optional) → choir preservation (optional) → generic SFX scan → custom reference matching (optional) → remix → download.
-
-
 
 Each job is a folder under `backend/jobs/` with a `status.json` file tracking progress. No database — everything is on disk.
 
 ---
+
+
 
 ## Project structure
 
@@ -215,6 +235,8 @@ music-cleaner/
 
 ---
 
+
+
 ## Tech stack
 
 
@@ -233,6 +255,8 @@ music-cleaner/
 **Not used:** accounts, cloud storage, Redis, Celery, or a SQL database.
 
 ---
+
+
 
 ## Running tests
 
@@ -253,6 +277,8 @@ npm test
 
 ---
 
+
+
 ## Manual smoke test checklist
 
 Use a **30–60 second** clip first.
@@ -268,7 +294,11 @@ Use a **30–60 second** clip first.
 
 ---
 
+
+
 ## Troubleshooting
+
+
 
 ### Docker and startup
 
@@ -280,17 +310,21 @@ Use a **30–60 second** clip first.
 | `gpus: all` error            | Remove GPU block in `docker-compose.yml`; set `DEVICE=cpu` |
 
 
+
+
 ### During processing
 
 
-| Problem                            | Fix                                                               |
-| ---------------------------------- | ----------------------------------------------------------------- |
-| Very slow first job                | Model download; weights cache in `backend/models/`                |
-| Progress stuck low on **Ensemble** | Normal — multiple passes; can take 30–60+ min                     |
-| **Denoise** barely changed audio   | Expected on loud SFX; denoise targets hiss/hum, not impact hits   |
+| Problem                            | Fix                                                                |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| Very slow first job                | Model download; weights cache in `backend/models/`                 |
+| Progress stuck low on **Ensemble** | Normal — multiple passes; can take 30–60+ min                      |
+| **Denoise** barely changed audio   | Expected on loud SFX; denoise targets hiss/hum, not impact hits    |
 | **Custom SFX** still audible       | Try a cleaner, shorter reference clip; reduce bleed is best-effort |
-| **Job not found**                  | Don't delete `backend/jobs/` while running; jobs expire after 24h |
-| UI lost job after refresh          | Re-upload if needed; check `docker compose logs backend`          |
+| **Job not found**                  | Don't delete `backend/jobs/` while running; jobs expire after 24h  |
+| UI lost job after refresh          | Re-upload if needed; check `docker compose logs backend`           |
+
+
 
 
 ### Downloads and uploads
@@ -305,6 +339,8 @@ Use a **30–60 second** clip first.
 | CORS error       | Open `http://localhost:5173`, not `:8000` directly     |
 
 
+
+
 ### Performance
 
 
@@ -312,6 +348,8 @@ Use a **30–60 second** clip first.
 | -------------- | ----------------------------------------------------- |
 | Out of memory  | Use **Fast**; shorter clip; close other apps          |
 | Slow on laptop | Use **Fast** or **Balanced**; enable GPU if available |
+
+
 
 
 ### Debug logs
@@ -323,20 +361,24 @@ cat backend/jobs/<job-id>/status.json
 
 ---
 
+
+
 ## API reference
 
 
-| Method | Endpoint                  | Description                                                |
-| ------ | ------------------------- | ---------------------------------------------------------- |
-| `GET`  | `/api/health`             | Health check                                               |
-| `GET`  | `/api/models`             | Curated presets + karaoke models                           |
-| `GET`  | `/api/models?full=true`   | Full audio-separator catalog                               |
+| Method | Endpoint                  | Description                                                                    |
+| ------ | ------------------------- | ------------------------------------------------------------------------------ |
+| `GET`  | `/api/health`             | Health check                                                                   |
+| `GET`  | `/api/models`             | Curated presets + karaoke models                                               |
+| `GET`  | `/api/models?full=true`   | Full audio-separator catalog                                                   |
 | `POST` | `/api/upload`             | Upload audio (+ optional `denoise_model_id`, `reference_clips`) → `{ job_id }` |
-| `GET`  | `/api/jobs/{id}`          | Job status and progress                                    |
-| `GET`  | `/api/jobs/{id}/download` | Download result (default MP3; `?format=wav`; `?bitrate=192 |
+| `GET`  | `/api/jobs/{id}`          | Job status and progress                                                        |
+| `GET`  | `/api/jobs/{id}/download` | Download result (default MP3; `?format=wav`; `?bitrate=192                     |
 
 
 ---
+
+
 
 ## Credits
 
