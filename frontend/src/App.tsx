@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  DenoiseModelId,
   downloadUrl,
   fetchJob,
   fetchModels,
@@ -12,9 +13,11 @@ const STAGE_LABELS: Record<string, string> = {
   queued: "Waiting in queue",
   loading_model: "Loading model weights",
   separating: "Separating vocals from music",
+  denoising: "Denoising instrumental",
   separating_karaoke: "Running karaoke separation for choir",
   preserving_choir: "Preserving backing vocals and choir",
   detecting_sfx: "Scanning for sound effects",
+  matching_custom_sfx: "Matching custom reference SFX",
   remixing: "Mixing stems into final output",
   removing_sfx: "Reducing detected sound effects",
   finalizing: "Finalizing output",
@@ -40,6 +43,13 @@ function isMainGridModel(model: ModelPreset): boolean {
 }
 
 const ACTIVE_JOB_KEY = "music-cleaner-active-job";
+const MAX_REFERENCE_CLIPS = 10;
+
+type ReferenceClipItem = {
+  id: string;
+  file: File;
+  enabled: boolean;
+};
 
 export default function App() {
   const [models, setModels] = useState<ModelPreset[]>([]);
@@ -48,8 +58,10 @@ export default function App() {
   const [karaokeModelId, setKaraokeModelId] = useState("karaoke_mdx_kara2");
   const [choirAggressiveness, setChoirAggressiveness] = useState(0);
   const [sfxStrength, setSfxStrength] = useState(100);
+  const [denoiseModelId, setDenoiseModelId] = useState<DenoiseModelId>("");
   const [mp3Bitrate, setMp3Bitrate] = useState<Mp3Bitrate>(192);
   const [file, setFile] = useState<File | null>(null);
+  const [referenceClips, setReferenceClips] = useState<ReferenceClipItem[]>([]);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobModelId, setJobModelId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
@@ -175,11 +187,17 @@ export default function App() {
     setStage("");
     setStatus("uploading");
 
+    const enabledRefs = referenceClips
+      .filter((clip) => clip.enabled)
+      .map((clip) => clip.file);
+
     try {
       const result = await uploadAudio(file, modelId, {
         sfxStrength: sfxStrength / 100,
         karaokeModelId,
         choirAggressiveness: choirAggressiveness / 100,
+        denoiseModelId,
+        referenceClips: enabledRefs,
       });
       setJobId(result.job_id);
       setStatus("queued");
@@ -189,6 +207,34 @@ export default function App() {
     }
   }
 
+  function handleReferenceFilesSelected(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    const incoming = Array.from(fileList);
+    setReferenceClips((current) => {
+      const room = MAX_REFERENCE_CLIPS - current.length;
+      if (room <= 0) return current;
+      const next = incoming.slice(0, room).map((refFile) => ({
+        id: `${refFile.name}-${refFile.size}-${refFile.lastModified}-${Math.random()}`,
+        file: refFile,
+        enabled: true,
+      }));
+      return [...current, ...next];
+    });
+  }
+
+  function toggleReferenceClip(id: string) {
+    setReferenceClips((current) =>
+      current.map((clip) =>
+        clip.id === id ? { ...clip, enabled: !clip.enabled } : clip,
+      ),
+    );
+  }
+
+  function removeReferenceClip(id: string) {
+    setReferenceClips((current) => current.filter((clip) => clip.id !== id));
+  }
+
+  const enabledReferenceCount = referenceClips.filter((c) => c.enabled).length;
   const selectedModel = mainModels.find((m) => m.id === modelId);
   const selectedKaraoke = karaokeModels.find((m) => m.id === karaokeModelId);
   const activeJobModel =
@@ -338,6 +384,85 @@ export default function App() {
               similar effects as much as possible
             </p>
           </label>
+
+          <label className="field-control denoise-control" htmlFor="denoise-model">
+            <span className="field-label">Denoise (optional)</span>
+            <select
+              id="denoise-model"
+              value={denoiseModelId}
+              disabled={isBusy}
+              onChange={(e) =>
+                setDenoiseModelId(e.target.value as DenoiseModelId)
+              }
+            >
+              <option value="">Off</option>
+              <option value="denoise_lite">Lite — gentler hiss/hum cleanup</option>
+              <option value="denoise">Standard — stronger UVR DeNoise</option>
+            </select>
+            <p className="slider-hint">
+              Runs after vocal removal on the instrumental bed. Helps with
+              hiss/hum; may not erase loud anime SFX. Standard can thin air or
+              cymbals more than Lite.
+            </p>
+          </label>
+
+          <div className="field-control">
+            <span className="field-label">Custom reference SFX (optional)</span>
+            <label className="ref-file-picker" htmlFor="reference-upload">
+              <input
+                id="reference-upload"
+                type="file"
+                accept="audio/*,.mp3,.wav,.flac,.m4a"
+                multiple
+                disabled={isBusy || referenceClips.length >= MAX_REFERENCE_CLIPS}
+                onChange={(e) => {
+                  handleReferenceFilesSelected(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              Add short isolated clips (ki blast, aura, whoosh…)
+            </label>
+            <p className="slider-hint">
+              Enabled clips are matched against the instrumental after vocal
+              removal. Max {MAX_REFERENCE_CLIPS}. Uncheck to skip a clip without
+              removing it.
+            </p>
+            {referenceClips.length > 0 && (
+              <ul className="ref-clip-list">
+                {referenceClips.map((clip) => (
+                  <li key={clip.id} className="ref-clip-item">
+                    <label className="ref-clip-toggle">
+                      <input
+                        type="checkbox"
+                        checked={clip.enabled}
+                        disabled={isBusy}
+                        onChange={() => toggleReferenceClip(clip.id)}
+                      />
+                      <span className="ref-clip-name" title={clip.file.name}>
+                        {clip.file.name}
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      className="ref-clip-remove"
+                      disabled={isBusy}
+                      onClick={() => removeReferenceClip(clip.id)}
+                      aria-label={`Remove ${clip.file.name}`}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {enabledReferenceCount > 0 && (
+              <p className="slider-hint">
+                {enabledReferenceCount} clip
+                {enabledReferenceCount === 1 ? "" : "s"} will be uploaded for
+                custom matching
+              </p>
+            )}
+          </div>
         </section>
 
         <section className="panel-section">
