@@ -3,9 +3,10 @@ FastAPI application — upload, job status, download.
 
 Pipeline per job:
   1. UVR instrumental separation → instrumental_raw.wav (standard bed)
-  2. Optional choir preservation (karaoke stem + heuristics) when enabled
-  3. SFX detection
-  4. Remix (choir overlay + SFX) → final downloadable WAV (MP3 on download)
+  2. Optional UVR denoise (Lite or Standard) → instrumental_denoised.wav
+  3. Optional choir preservation (karaoke stem + heuristics) when enabled
+  4. SFX detection (generic AudioSet) + optional custom reference matching
+  5. Remix (choir overlay + SFX) → final downloadable WAV (MP3 on download)
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import logging
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,16 +33,25 @@ from app.pipeline.remix import (
 )
 from app.pipeline.model_registry import (
     DEFAULT_KARAOKE_MODEL_ID,
+    DENOISE_LITE_MODEL_ID,
+    DENOISE_PRESET_IDS,
     REFERENCE_INSTRUMENTAL_MODEL_ID,
     ModelPreset,
     get_preset,
+    is_denoise_preset,
     is_separable_preset,
     list_all_models,
+    list_cleanup_presets,
     list_karaoke_presets,
     list_presets,
 )
-from app.pipeline.separator import canonicalize_instrumental, separate_instrumental
+from app.pipeline.separator import (
+    canonicalize_instrumental,
+    denoise_instrumental,
+    separate_instrumental,
+)
 from app.pipeline.sfx import detect_sfx_segments
+from app.pipeline.custom_sfx import embed_reference_clips, match_references_in_mix
 from app.settings import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -67,6 +78,7 @@ ALLOWED_UPLOAD_MIME_TYPES = frozenset(
     }
 )
 _UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1 MB
+MAX_REFERENCE_CLIPS = 10
 
 
 @asynccontextmanager
@@ -111,6 +123,7 @@ def models(full: bool = Query(default=False)) -> dict:
         "source": "registry",
         "models": list_presets(),
         "karaoke_models": list_karaoke_presets(),
+        "cleanup_models": list_cleanup_presets(),
         "default_karaoke_model_id": DEFAULT_KARAOKE_MODEL_ID,
     }
 
@@ -123,12 +136,18 @@ async def upload(
     karaoke_model_id: str = Form(default=DEFAULT_KARAOKE_MODEL_ID),
     choir_aggressiveness: float = Form(default=0.0),
     sfx_strength: float = Form(default=1.0),
+    enable_denoise: bool = Form(default=False),
+    denoise_model_id: str = Form(default=""),
+    reference_clips: Annotated[list[UploadFile], File()] = [],
 ) -> dict:
     """
     Accept an audio upload and queue separation + optional choir + SFX cleanup.
 
     choir_aggressiveness: 0.0–1.0 — blends extracted choir back onto the bed.
     sfx_strength: 0.0–1.0 (1.0 = full attenuation in detected SFX regions).
+    enable_denoise: legacy flag; if true with empty denoise_model_id, uses Lite.
+    denoise_model_id: cleanup preset id (``denoise_lite`` / ``denoise``) or empty.
+    reference_clips: optional short SFX samples for custom matching (Phase 2b).
     """
     preset = get_preset(model_id)
     if preset is None:
@@ -141,6 +160,12 @@ async def upload(
 
     choir_aggressiveness = float(max(0.0, min(1.0, choir_aggressiveness)))
     sfx_strength = float(max(0.0, min(1.0, sfx_strength)))
+    enable_denoise = _as_bool(enable_denoise)
+    try:
+        denoise_model_id = _resolve_denoise_model_id(denoise_model_id, enable_denoise)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    enable_denoise = bool(denoise_model_id)
 
     karaoke_preset = get_preset(karaoke_model_id)
     if choir_aggressiveness > 0 and (
@@ -151,6 +176,16 @@ async def upload(
             detail=f"Unknown or invalid karaoke_model_id: {karaoke_model_id}",
         )
 
+    # Drop empty placeholders some browsers send when the multi-file input is unused.
+    ref_uploads = [clip for clip in reference_clips if clip.filename]
+    if len(ref_uploads) > MAX_REFERENCE_CLIPS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many reference clips (max {MAX_REFERENCE_CLIPS}).",
+        )
+    for clip in ref_uploads:
+        _validate_upload_file(clip)
+
     status = job_store.create_job(model_id=model_id, original_filename=file.filename)
     job_id = status["id"]
     job_store.update_job(
@@ -158,6 +193,9 @@ async def upload(
         sfx_strength=sfx_strength,
         karaoke_model_id=karaoke_model_id,
         choir_aggressiveness=choir_aggressiveness,
+        enable_denoise=enable_denoise,
+        denoise_model_id=denoise_model_id or None,
+        custom_sfx_clip_count=len(ref_uploads),
     )
 
     directory = job_store.job_dir(job_id)
@@ -170,6 +208,31 @@ async def upload(
 
     logger.info("Saved upload for job %s (%d bytes, %s)", job_id, bytes_written, suffix)
 
+    reference_paths: list[Path] = []
+    if ref_uploads:
+        refs_dir = directory / "references"
+        refs_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            for index, clip in enumerate(ref_uploads):
+                ref_suffix = Path(clip.filename or "").suffix.lower() or ".wav"
+                # Keep original stem so MatchSegment labels stay readable.
+                safe_stem = (
+                    "".join(
+                        ch if ch.isalnum() or ch in "-_ " else "_"
+                        for ch in Path(clip.filename or f"ref_{index}").stem
+                    ).strip()[:80]
+                    or f"ref_{index}"
+                )
+                ref_path = refs_dir / f"{index:02d}_{safe_stem}{ref_suffix}"
+                await _save_upload_limited(clip, ref_path, settings.max_upload_bytes)
+                reference_paths.append(ref_path)
+        except _UploadTooLarge as exc:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except HTTPException:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+
     background_tasks.add_task(
         _run_pipeline,
         job_id,
@@ -178,6 +241,9 @@ async def upload(
         karaoke_model_id,
         choir_aggressiveness,
         sfx_strength,
+        reference_paths,
+        enable_denoise,
+        denoise_model_id,
     )
     return {"job_id": job_id, "status": status["status"]}
 
@@ -344,13 +410,24 @@ def _run_pipeline(
     karaoke_model_id: str,
     choir_aggressiveness: float,
     sfx_strength: float,
+    reference_paths: list[Path] | None = None,
+    enable_denoise: bool = False,
+    denoise_model_id: str = "",
 ) -> None:
     """
-    Background worker: UVR separation → optional choir → SFX scan → remix finalize.
+    Background worker: UVR → optional denoise → optional choir → SFX → remix.
 
-    Download defaults to instrumental_raw.wav. instrumental.wav is used when SFX
-    regions were detected and attenuated during the remix step.
+    Download defaults to instrumental_raw.wav. instrumental_denoised.wav is used
+    when denoise ran and no SFX remix file is produced. instrumental.wav is used
+    when SFX regions were attenuated during remix.
     """
+    reference_paths = list(reference_paths or [])
+    try:
+        denoise_model_id = _resolve_denoise_model_id(denoise_model_id, enable_denoise)
+    except ValueError as exc:
+        job_store.update_job(job_id, status="failed", stage="error", error=str(exc))
+        return
+    enable_denoise = bool(denoise_model_id)
     try:
         standard_preset, karaoke_preset, choir_aggressiveness, choir_enabled = (
             _resolve_pipeline_presets(model_id, karaoke_model_id, choir_aggressiveness)
@@ -366,7 +443,12 @@ def _run_pipeline(
         job_store.set_stage(job_id, "separating", progress=5, status="processing")
 
         def on_standard_separate(percent: int, _stage: str) -> None:
-            cap = 35 if choir_enabled else 65
+            if enable_denoise:
+                cap = 28
+            elif choir_enabled:
+                cap = 35
+            else:
+                cap = 65
             mapped = 5 + int((percent / 100) * (cap - 5))
             job_store.update_job(job_id, progress=mapped)
 
@@ -378,6 +460,27 @@ def _run_pipeline(
         )
         work_path = canonicalize_instrumental(uvr_output, directory)
         choir_candidate_path: Path | None = None
+
+        # --- Step 1b: optional denoise on the instrumental bed ---
+        if enable_denoise:
+            job_store.set_stage(job_id, "denoising", progress=30)
+
+            def on_denoise(percent: int, _stage: str) -> None:
+                mapped = 30 + int((percent / 100) * 6)
+                job_store.update_job(job_id, progress=mapped)
+
+            work_path = denoise_instrumental(
+                input_path=work_path,
+                output_dir=directory,
+                progress_callback=on_denoise,
+                model_id=denoise_model_id,
+            )
+            logger.info(
+                "Job %s: denoise (%s) applied → %s",
+                job_id,
+                denoise_model_id,
+                work_path.name,
+            )
 
         # --- Step 2: optional choir candidate extraction ---
         if choir_enabled and karaoke_preset is not None:
@@ -423,9 +526,35 @@ def _run_pipeline(
         if fired_labels:
             logger.info("Job %s SFX classes detected: %s", job_id, fired_labels)
 
+        # --- Step 3b: optional custom reference matching (Phase 2b) ---
+        custom_matches = []
+        if reference_paths:
+            job_store.set_stage(job_id, "matching_custom_sfx", progress=82)
+            refs = embed_reference_clips(reference_paths)
+            custom_matches = match_references_in_mix(work_path, refs)
+            job_store.update_job(
+                job_id,
+                custom_sfx_segment_count=len(custom_matches),
+                custom_sfx_labels=[m.label for m in custom_matches],
+            )
+            logger.info(
+                "Job %s: custom SFX %d match(es) from %d reference(s)",
+                job_id,
+                len(custom_matches),
+                len(refs),
+            )
+
         # --- Step 4: Remix stems → final WAV ---
-        apply_sfx = bool(sfx_segments) and sfx_strength > 0
-        download_name = "instrumental.wav" if apply_sfx else "instrumental_raw.wav"
+        apply_sfx = (
+            (bool(sfx_segments) or bool(custom_matches)) and sfx_strength > 0
+        )
+        if apply_sfx:
+            download_name = "instrumental.wav"
+        elif enable_denoise:
+            # Keep instrumental_raw.wav as the undenoised UVR bed for A/B.
+            download_name = "instrumental_denoised.wav"
+        else:
+            download_name = "instrumental_raw.wav"
         final_path = directory / download_name
 
         job_store.set_stage(job_id, "remixing", progress=88)
@@ -437,11 +566,16 @@ def _run_pipeline(
                 choir_gain=choir_aggressiveness if choir_enabled else 0.0,
                 sfx_segments=tuple(sfx_segments),
                 sfx_strength=sfx_strength if apply_sfx else 0.0,
+                custom_sfx_segments=tuple(custom_matches),
             )
         )
 
         if not apply_sfx:
-            logger.info("Job %s: no SFX to remove — download will use UVR stem", job_id)
+            logger.info(
+                "Job %s: no SFX remix — download will use %s",
+                job_id,
+                download_name,
+            )
 
         job_store.set_stage(
             job_id,
@@ -453,3 +587,33 @@ def _run_pipeline(
     except Exception as exc:  # noqa: BLE001 — surface error to client via status.json
         logger.exception("Job %s failed", job_id)
         job_store.update_job(job_id, status="failed", stage="error", error=str(exc))
+
+
+def _as_bool(value: object) -> bool:
+    """Normalize multipart form booleans (bool or common string forms)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _resolve_denoise_model_id(denoise_model_id: object, enable_denoise: bool) -> str:
+    """
+    Normalize denoise selection to a cleanup preset id or "".
+
+    Empty / off → "". Legacy ``enable_denoise=true`` with no model → Lite.
+    """
+    model_id = str(denoise_model_id or "").strip()
+    if model_id.lower() in {"", "none", "off", "false", "0"}:
+        model_id = ""
+    if not model_id and enable_denoise:
+        model_id = DENOISE_LITE_MODEL_ID
+    if model_id and not is_denoise_preset(model_id):
+        raise ValueError(
+            f"Unknown denoise_model_id: {model_id}. "
+            f"Use one of: {', '.join(sorted(DENOISE_PRESET_IDS))}."
+        )
+    return model_id
